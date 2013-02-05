@@ -1,0 +1,5 @@
+*.pickle
+*.bk*
+*.pyc
+.DS_Store
+
