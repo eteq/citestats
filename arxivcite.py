@@ -18,7 +18,15 @@ Last, if you do trigger the block, just let us know (ads@cfa.harvard.edu
 is fine for correspondence), and we'll unblock you.
 """
 
-
+_exampleurl="http://adsabs.harvard.edu/cgi-bin/nph-abs_connect?db_key=ALL&warnings=YES&version=1&bibcode=arXiv%3A1302.1193%0D%0AarXiv%3A1302.1160&nr_to_return=100&start_nr=1"
+_parsesto="""
+{'bibcode': ['arXiv:1302.1193\r\narXiv:1302.1160'],
+ 'http://adsabs.harvard.edu/cgi-bin/nph-abs_connect?db_key': ['ALL'],
+ 'nr_to_return': ['100'],
+ 'start_nr': ['1'],
+ 'version': ['1'],
+ 'warnings': ['YES']}
+ """
 
 if __name__ == '__main__':
     harvkwargs = dict(basewritename='arXiv_oai/reclist', startdate=None,
