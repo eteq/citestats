@@ -1,0 +1,3 @@
+[submodule "arxivoai2"]
+	path = arxivoai2
+	url = git://github.com/eteq/arxivoai2.git
