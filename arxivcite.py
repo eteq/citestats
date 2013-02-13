@@ -466,7 +466,6 @@ def kill_mongodbs():
         os.kill(pid, signal.SIGTERM)
 
 
-
 def populate_mongodb_from_arxiv_reclists(reclistfns, dbname='citestats',
     collname='astroph', verbose=True):
     from datetime import datetime
@@ -486,6 +485,15 @@ def populate_mongodb_from_arxiv_reclists(reclistfns, dbname='citestats',
                      'Oct': 10,
                      'Nov': 11,
                      'Dec': 12}
+
+    weekdaynumtostr = {0: 'Mon',
+                       1: 'Tue',
+                       2: 'Wed',
+                       3: 'Thu',
+                       4: 'Fri',
+                       5: 'Sat',
+                       6: 'Sun'
+                      }
 
     if isinstance(reclistfns, basestring):
         reclistfns = glob(reclistfns)
