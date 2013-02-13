@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 from __future__ import division
 
 """
@@ -319,11 +320,13 @@ mirrors = [
  ('Observatorio Nacional, Rio de Janeiro, Brazil', 'http://ads.on.br')
  ]
 
+
 def query_ads_for_citations_from_arxiv_ids(ids, adsurl='http://adsabs.harvard.edu', nperquery=100, waittime=30):
     """
     Gets the citation counts from ADS from a list of arxiv ids.
 
     WARNING: this only gets cites to the *arXiv* version, not the refereed one.
+    So this is probably useless.
 
     Parameters
     ----------
@@ -412,11 +415,15 @@ def do_arxiv_session(incremental=False):
     return arxivoai2.run_session(**harvkwargs)
 
 
-def open_mongodb(dbdir='db', port=None, waitforstartsecs=1):
+def start_mongodb(dbdir='db', port=None, waitforstartsecs=1, multimongo=False):
     """
+    Starts mongodb in a backbground process
     """
     from time import sleep
     from subprocess import Popen, PIPE, STDOUT
+
+    if not multimongo and len(find_mongo_pids()) > 0:
+        raise ValueError('Mongo process(s) already open!')
 
     p = Popen(['mongod', '--dbpath', dbdir, '--logpath', dbdir + '/mongod.log', '--logappend'], stdout=PIPE, stderr=STDOUT)
     sleep(waitforstartsecs)
@@ -424,3 +431,123 @@ def open_mongodb(dbdir='db', port=None, waitforstartsecs=1):
     if res is not None:
         raise ValueError("Mongod ended immediately after starting - it probably errored")
     return p
+
+
+def find_mongo_pids(printpsline=False):
+    """
+    Lists all the mongodb processes
+    """
+    from subprocess import Popen, PIPE
+
+    proc = Popen(['ps', '-A'], stdout=PIPE)
+    stdout = proc.communicate()[0]
+    if proc.returncode != 0:
+        raise OSError('ps -A failed!')
+
+    pids = []
+    for l in stdout.split('\n'):
+        if 'mongod' in l and not '(mongod)' in l:
+            if printpsline:
+                print l
+            pids.append(int(l.split()[0]))
+
+    return pids
+
+
+def kill_mongodbs():
+    import os
+    import signal
+
+    pids = find_mongo_pids(True)
+    if len(pids) == 0:
+        raise ValueError('no mongodbs found!')
+
+    for pid in pids:
+        os.kill(pid, signal.SIGTERM)
+
+
+
+def populate_mongodb_from_arxiv_reclists(reclistfns, dbname='citestats',
+    collname='astroph', verbose=True):
+    from datetime import datetime
+    from xml.etree import cElementTree
+    from glob import glob
+    from pymongo import MongoClient
+
+    monthstrtonum = {'Jan': 1,
+                     'Feb': 2,
+                     'Mar': 3,
+                     'Apr': 4,
+                     'May': 5,
+                     'Jun': 6,
+                     'Jul': 7,
+                     'Aug': 8,
+                     'Sep': 9,
+                     'Oct': 10,
+                     'Nov': 11,
+                     'Dec': 12}
+
+    if isinstance(reclistfns, basestring):
+        reclistfns = glob(reclistfns)
+
+    conn = MongoClient()
+    try:
+        coll = conn[dbname][collname]
+
+        for fn in reclistfns:
+            if verbose:
+                print 'Populating db for file', fn
+
+            et = cElementTree.parse(fn)
+            for e in et.getroot().getchildren():
+                if e.tag == '{http://www.openarchives.org/OAI/2.0/}ListRecords':
+                    for record in e.getchildren():
+                        if record.tag == '{http://www.openarchives.org/OAI/2.0/}record':
+                            meta = record.find('{http://www.openarchives.org/OAI/2.0/}metadata')
+
+                            idstr = ''.join(meta.find('.//{http://arxiv.org/OAI/arXivRaw/}id').itertext())
+                            vers = meta.findall('.//{http://arxiv.org/OAI/arXivRaw/}version')
+                            for v in vers:
+                                if v.get('version') == 'v1':
+                                    assert v[0].tag == '{http://arxiv.org/OAI/arXivRaw/}date'
+                                    datestr = ''.join(v[0].itertext())
+                                    break
+                            else:
+                                raise ValueError('No v1 found in record for id {0} in file {1}'.format(idstr, fn))
+
+                            #covert datestr to a datetime
+                            day, dt = datestr.split(',')
+
+                            day, monthstr, year, tme = dt.split()[:-1]  # last is "GMT"
+                            hr, mn, sec = [int(s) for s in tme.split(':')]
+                            dt = datetime(int(year), monthstrtonum[monthstr], int(day), hr, mn, sec)
+
+                            #insert into the db
+                            coll.insert({'arxiv_id': idstr, 'arxiv_date': dt, 'arxiv_day': day})
+
+                    break
+            else:
+                raise ValueError('Could not find ListRecords elemnt in reclist file ' + fn)
+    finally:
+        conn.close()
+
+
+def get_data_from_ads(adsurl, arxivid):
+    raise NotImplementedError
+
+
+def update_record_from_ads(coll, aid, data):
+    return coll.update({'arxiv_id': aid}, {'$set': data})
+
+
+def run_ads_queries(dbname='citestats',
+    collname='astroph', verbose=True):
+    from pymongo import MongoClient
+
+    conn = MongoClient()
+    try:
+        coll = conn[dbname][collname]
+
+        raise NotImplementedError
+    finally:
+        conn.close()

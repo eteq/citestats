@@ -3,4 +3,5 @@
 *.pyc
 .DS_Store
 arXiv_oai
+db/*
 
