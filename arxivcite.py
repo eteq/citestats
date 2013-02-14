@@ -5,6 +5,7 @@ from __future__ import division
 """
 A module to query arxiv and match to ADS for citation statistics.
 """
+import Queue as queue
 
 from arxivoai2 import arxivoai2
 
@@ -250,6 +251,9 @@ URLOPEN_TIMEOUT = 5  # seconds
 
 
 def get_cite_count_data_from_ads(arxivid, adsurl, stdoutqueue=None):
+    """
+    This gets run from process_data_from_ads
+    """
     from urllib2 import urlopen, URLError
     from xml.etree import cElementTree
 
@@ -258,7 +262,7 @@ def get_cite_count_data_from_ads(arxivid, adsurl, stdoutqueue=None):
     tries = 0
 
     if stdoutqueue is not None:
-        stdoutqueue.put('Attempting to query ' + url)
+        stdoutqueue.put('Attempting to query {0} (ADSURL: {1})'.format(url, adsurl))
 
     while True:  # killed by break or URLError
         tries += 1
@@ -286,6 +290,14 @@ def get_cite_count_data_from_ads(arxivid, adsurl, stdoutqueue=None):
     authorelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}author')
     if authorelem is not None:
         data['fauthor'] = authorelem.itertext().next()
+    pubdateelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}pubdate')
+    if pubdateelem is not None:
+        data['pubdate'] = pubdateelem.itertext().next()
+
+    journalelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}journal')
+    if journalelem is not None:
+        data['journal'] = jstr = journalelem.itertext().next()
+        data['onlyarxiv'] = jstr.startswith('eprint arXiv')
 
     return data
 
@@ -295,10 +307,8 @@ EMPTY_PROC_WAITTIME = 1
 
 
 def process_data_from_ads(arxividqueue, stdoutqueue, adsurl, dbname, collname, querywaittime):
-    import Queue as queue
-
     """
-    Meant to be run as a process
+    Meant to be run as a child process
 
     if `stdoutqueue` is None, equivalent of ``not verbose``
     """
@@ -316,7 +326,7 @@ def process_data_from_ads(arxividqueue, stdoutqueue, adsurl, dbname, collname, q
 
                 if aid == 'done':
                     if stdoutqueue is not None:
-                        stdoutqueue.put('All done! (URL: {0})'.format(adsurl))
+                        stdoutqueue.put('All done! (ADSURL: {0})'.format(adsurl))
                     return
 
                 sttime = time.time()
@@ -325,7 +335,7 @@ def process_data_from_ads(arxividqueue, stdoutqueue, adsurl, dbname, collname, q
                 endtime = time.time()
 
                 if stdoutqueue is not None:
-                    msg = 'Query/update for arxiv id "{0}"" took {1} sec. Waiting for ~ {2} sec. (URL: {3})'
+                    msg = 'Query/update for arxiv id "{0}"" took {1} sec. Waiting for ~ {2} sec. (ADSURL: {3})'
                     stdoutqueue.put(msg.format(aid, endtime - sttime, querywaittime - (time.time() - sttime), adsurl))
 
                 #now make sure the waittime has passed before trying again
@@ -336,36 +346,58 @@ def process_data_from_ads(arxividqueue, stdoutqueue, adsurl, dbname, collname, q
                 empties += 1
                 if empties > EMPTY_TIMES:
                     if stdoutqueue is not None:
-                        stdoutqueue.put('Input queue was empty {0} times! (URL: {1})'.format(empties, adsurl))
+                        stdoutqueue.put('Input queue was empty {0} times! (ADSURL: {1})'.format(empties, adsurl))
                     return
                 time.sleep(EMPTY_PROC_WAITTIME)  # wait a second and then check again
     finally:
         conn.close()
 
 
+# a regular expression for filtering stdout - anything that matches is ignored
+STDOUTFILTERRE = '(Attempting|Query/update).*'
+
+
 def run_ads_queries(dbname='citestats', collname='astroph', verbose=True,
                     mirrorurls=[m[1] for m in mirrors], querywaittime=30,
-                    mainloopwaittime=1):
+                    mainloopwaittime=1, statusinfoperiod=1, doexit=False,
+                    overwrite=False):
     """
     Runs the query over the given `mirrorurls` (should be valid URLs)
+
+    `statusinfoperiod` is the time (in min) between printings of progress/status
+    updates. 0 means don't do any.
+
+    `overwrite` means ignore which ones already have an ADS entry
     """
     import time
+    import sys
+    import re
     from multiprocessing import Process, Queue
-    import Queue as queue
 
     from pymongo import MongoClient
+
+    stdoutfilter = re.compile(STDOUTFILTERRE)
 
     conn = MongoClient()
     try:
         coll = conn[dbname][collname]
 
-        aidstoquerylst = [doc['arxiv_id'] for doc in coll.find() if not 'bibcode' in doc]
+        if overwrite:
+            aidstoquerylst = [doc['arxiv_id'] for doc in coll.find()]
+        else:
+            aidstoquerylst = [doc['arxiv_id'] for doc in coll.find() if not 'bibcode' in doc]
 
     finally:
         conn.close()
 
+    nstartaids = len(aidstoquerylst)
+
     if verbose:
-        print '# of ArXiv IDs to query:', len(aidstoquerylst)
+        print '# of ArXiv IDs to query:', nstartaids
+
+    #these are the markers that indicate it's time to quit
+    for m in mirrorurls:
+        aidstoquerylst.insert(0, 'done')
 
     #a queue for the ids, to be processed by the workers
     arxividqueue = Queue()
@@ -382,11 +414,6 @@ def run_ads_queries(dbname='citestats', collname='astroph', verbose=True,
 
     procs = []
     sttime = time.time()
-
-    #these are the markers that indicate it's time to quit
-    for m in mirrorurls:
-        aidstoquerylst.insert(0, 'done')
-
     try:  # be sure to kill the processes even if an exception arises
         for m in mirrorurls:
             p = Process(target=process_data_from_ads, args=(arxividqueue,
@@ -396,45 +423,84 @@ def run_ads_queries(dbname='citestats', collname='astroph', verbose=True,
             if verbose:
                 print 'Started process', p.pid
 
+        laststatustime = -float('inf')  # used for figuring out when the status updae should appear
+
         #run the primary loop that polls stdout and full populates the input queue
         while len(aidstoquerylst) > 0 or not arxividqueue.empty():  # this is not reliable, but is an ok first guess
             #first try to dump from the id list
             try:
+                valtoput = None
                 while len(aidstoquerylst) > 0:
-                    arxividqueue.put_nowait(aidstoquerylst.pop())
+                    valtoput = aidstoquerylst.pop()
+                    arxividqueue.put_nowait(valtoput)
+                    valtoput = None
             except queue.Full:
-                pass  # will try next time around
+                if valtoput is not None:
+                    aidstoquerylst.append(valtoput)
 
-            try:
-                while True:  # will drop out when stdoutqueue is empty
-                    print stdoutqueue.get_nowait()
-            except queue.Empty:
-                time.sleep(mainloopwaittime)
+            print_filtered_stdout(stdoutqueue, None if verbose == 'all' else stdoutfilter, mainloopwaittime)
 
-            if not any([p.is_alive() for p in procs]) and not arxividqueue.empty():
-                print 'Some procs terminated before completion!'
+            nprocsalive = sum([p.is_alive() for p in procs])
+
+            if nprocsalive == 0 and not arxividqueue.empty():
+                print 'Procs terminated before queue is empty!'
                 break
 
-        #the arxividqueue is empty, so we should be finishing up.
+            if mainloopwaittime > 0 and (time.time() - laststatustime) / 60. > mainloopwaittime:
+                try:
+                    ncurraids = len(aidstoquerylst) + arxividqueue.qsize()
+                except NotImplementedError:  # broken qsize on Mac OS X
+                    ncurraids = len(aidstoquerylst) + arxividqueue._maxsize
+
+                elapsedhr = (time.time() - sttime) / 3600.
+                idsperhour = (nstartaids - ncurraids) / elapsedhr
+                remhr = ncurraids / idsperhour
+
+                msg = 'STATUS UPDATE: Of {0} initial arXiv ids, ~{1} remain.  {2} hours elapsed, ~{3} remaining. {4} of original {5} procs still alive.'
+                print msg.format(nstartaids, ncurraids, elapsedhr, remhr, nprocsalive, len(mirrorurls))
+                laststatustime = time.time()
+
+        #end of main loop - the arxividqueue is empty, so we should be finishing up.
         for p in procs:
             p.join()
 
             #empty out any messages
-            try:
-                while True:  # will droup out when stdoutqueue is empty
-                    print stdoutqueue.get_nowait()
-            except queue.Empty:
-                pass
+            print_filtered_stdout(stdoutqueue, None if verbose == 'all' else stdoutfilter)
 
         endtime = time.time()
         if verbose:
             print 'Total time', (endtime - sttime) / 3600, 'hrs'
 
     finally:  # at the end always make sure everything is dead
+        cleanexit = True
         for p in procs:
             if p.is_alive():
                 print 'Terminating process', p.pid
                 p.terminate()
+                cleanexit = False
+        if doexit:
+            sys.exit(0 if cleanexit else 1)
+
+
+def print_filtered_stdout(stdoutqueue, stdoutfilter=None, emptywait=0):
+    """
+    Prints everything in the queue until empty
+    """
+    import time
+
+    i = 0
+    try:
+        while True:  # will droup out when stdoutqueue is empty
+            stdoutstr = stdoutqueue.get_nowait()
+            i += 1
+            if stdoutfilter is None or stdoutfilter.match(stdoutstr) is None:
+                print stdoutstr
+
+    except queue.Empty:
+        if emptywait > 0:
+            time.sleep(emptywait)
+
+    return i
 
 # Below is a bunch of info text
 #--------------------------------
@@ -724,3 +790,8 @@ _result = """
 
 </records>
 """
+
+if __name__ == '__main__':
+    res = raw_input('Running run_ads_queries with defaults (override: o=overwrite, d=debug/verbose):')
+    run_ads_queries(doexit=True, overwrite='o' in res, verbose='all' if 'd' in res else True)
+
