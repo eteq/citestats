@@ -8,293 +8,6 @@ A module to query arxiv and match to ADS for citation statistics.
 
 from arxivoai2 import arxivoai2
 
-ipblockinfo = """
-Thanks for the email.  The ip block is triggered automatically by "too
-many in too short a time period" where, understandably, we don't want
-to advertise that rate.  If you put 30 seconds between queries, you'll
-probably avoid the block.  You can also spread out your searches over
-multiple mirrors which will allow you to get results back quicker...
-
-Last, if you do trigger the block, just let us know (ads@cfa.harvard.edu
-is fine for correspondence), and we'll unblock you.
-"""
-
-
-_exampleurl = "http://adsabs.harvard.edu/cgi-bin/nph-abs_connect?db_key=ALL&warnings=YES&version=1&bibcode=arXiv%3A1302.1193%0D%0AarXiv%3A1302.1160&nr_to_return=100&start_nr=1"
-_parsesto = """
-{'bibcode': ['arXiv:1302.1193\r\narXiv:1302.1160'],
- 'http://adsabs.harvard.edu/cgi-bin/nph-abs_connect?db_key': ['ALL'],
- 'nr_to_return': ['100'],
- 'start_nr': ['1'],
- 'version': ['1'],
- 'warnings': ['YES']}
- """
-
-_betterexample = 'http://adsabs.harvard.edu/cgi-bin/nph-abs_connect?db_key=ALL&warnings=YES&version=1&bibcode=arXiv%3Aastro-ph/0309704%0D%0AarXiv%3A1302.1160&data_type=Custom&format=%25c&nr_to_return=100&start_nr=1'
-_parsesto = """
-{'bibcode': ['arXiv:astro-ph/0309704\r\narXiv:1302.1160'],
- 'data_type': ['Custom'],
- 'format': ['%c'],
- 'http://adsabs.harvard.edu/cgi-bin/nph-abs_connect?db_key': ['ALL'],
- 'nr_to_return': ['100'],
- 'start_nr': ['1'],
- 'version': ['1'],
- 'warnings': ['YES']}
-"""
-
-"""
-Custom "%Q %c" yields:
-Query Results from the ADS Database
-
-
-Retrieved 3 abstracts, starting with number 1.  Total number selected: 3.
-
-eprint arXiv:1302.1160 0
-
-eprint arXiv:1112.1067 0
-
-eprint arXiv:astro-ph/0309704 0
-"""
-
-_absexample = "http://adsabs.harvard.edu/cgi-bin/bib_query?arXiv:1206.2619&data_type=SHORT_XML"
-_yields = """
-<?xml version="1.0"?>
-<records xmlns="http://ads.harvard.edu/schema/abs/1.1/references" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://ads.harvard.edu/schema/abs/1.1/references http://ads.harvard.edu/schema/abs/1.1/references.xsd" retrieved="1" start="1" selected="1">
-<record>
-<bibcode>2012MNRAS.423.3134F</bibcode>
-<title>A spectroscopic survey of Andromeda's Western Shelf</title>
-<author>Fardal, Mark A.</author>
-<author>Guhathakurta, Puragra</author>
-<author>Gilbert, Karoline M.</author>
-<author>Tollerud, Erik J.</author>
-<author>Kalirai, Jason S.</author>
-<author>Tanaka, Mikito</author>
-<author>Beaton, Rachael</author>
-<author>Chiba, Masashi</author>
-<author>Komiyama, Yutaka</author>
-<author>Iye, Masanori</author>
-<journal>Monthly Notices of the Royal Astronomical Society, Volume 423, Issue 4, pp. 3134-3147.</journal>
-<pubdate>Jul 2012</pubdate>
-<link type="ABSTRACT">
-  <name>Abstract</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=ABSTRACT</url>
-</link>
-<link type="EJOURNAL">
-  <name>Electronic On-line Article (HTML)</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=EJOURNAL</url>
-</link>
-<link type="ARTICLE">
-  <name>Full Printable Article (PDF/Postscript)</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=ARTICLE</url>
-</link>
-<link type="PREPRINT" access="open">
-  <name>arXiv e-print</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=PREPRINT</url>
-</link>
-<link type="REFERENCES">
-  <name>References in the Article</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=REFERENCES</url>
-  <count>49</count>
-</link>
-<link type="CITATIONS">
-  <name>Citations to the Article</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=CITATIONS</url>
-  <count>3</count>
-</link>
-<link type="REFCIT">
-  <name>Refereed Citations to the Article</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=REFCIT</url>
-</link>
-<link type="SIMBAD">
-  <name>SIMBAD Objects</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=SIMBAD</url>
-  <count>1</count>
-</link>
-<link type="AR">
-  <name>Also-Read Articles</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=AR</url>
-</link>
-<link type="OPENURL">
-  <name>Library Link Server</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=OPENURL</url>
-</link>
-<score>1.000</score>
-<citations>3</citations>
-<DOI>10.1111/j.1365-2966.2012.21094.x</DOI>
-<eprintid>arXiv:1206.2619</eprintid>
-</record>
-
-</records>
-
-"""
-
-_cite_query = 'http://adsabs.harvard.edu/cgi-bin/nph-ref_query?bibcode=2012MNRAS.423.3134F&amp;refs=CITATIONS&amp;db_key=AST&data_type=SHORT_XML'
-_result="""
-<?xml version="1.0"?>
-<records xmlns="http://ads.harvard.edu/schema/abs/1.1/references" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://ads.harvard.edu/schema/abs/1.1/references http://ads.harvard.edu/schema/abs/1.1/references.xsd" retrieved="3" start="1" selected="3">
-<record>
-<bibcode>2013ApJ...763....4L</bibcode>
-<title>PAndAS in the Mist: The Stellar and Gaseous Mass within the Halos of M31 and M33</title>
-<author>Lewis, Geraint F.</author>
-<author>Braun, Robert</author>
-<author>McConnachie, Alan W.</author>
-<author>Irwin, Michael J.</author>
-<author>Ibata, Rodrigo A.</author>
-<author>Chapman, Scott C.</author>
-<author>Ferguson, Annette M. N.</author>
-<author>Martin, Nicolas F.</author>
-<author>Fardal, Mark</author>
-<author>Dubinski, John</author>
-<author>Widrow, Larry</author>
-<author>Dougal Mackey, A.</author>
-<author>Babul, Arif</author>
-<author>Tanvir, Nial R.</author>
-<author>Rich, Michael</author>
-<journal>The Astrophysical Journal, Volume 763, Issue 1, article id. 4, 10 pp. (2013).</journal>
-<pubdate>Jan 2013</pubdate>
-<link type="ABSTRACT">
-  <name>Abstract</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=ABSTRACT</url>
-</link>
-<link type="EJOURNAL">
-  <name>Electronic On-line Article (HTML)</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=EJOURNAL</url>
-</link>
-<link type="ARTICLE">
-  <name>Full Printable Article (PDF/Postscript)</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=ARTICLE</url>
-</link>
-<link type="PREPRINT" access="open">
-  <name>arXiv e-print</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=PREPRINT</url>
-</link>
-<link type="REFERENCES">
-  <name>References in the Article</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=REFERENCES</url>
-  <count>74</count>
-</link>
-<link type="CITATIONS">
-  <name>Citations to the Article</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=CITATIONS</url>
-  <count>1</count>
-</link>
-<link type="REFCIT">
-  <name>Refereed Citations to the Article</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=REFCIT</url>
-</link>
-<link type="SIMBAD">
-  <name>SIMBAD Objects</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=SIMBAD</url>
-  <count>2</count>
-</link>
-<link type="AR">
-  <name>Also-Read Articles</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=AR</url>
-</link>
-<link type="OPENURL">
-  <name>Library Link Server</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=OPENURL</url>
-</link>
-<score>1.000</score>
-<citations>1</citations>
-<DOI>10.1088/0004-637X/763/1/4</DOI>
-<eprintid>arXiv:1211.4059</eprintid>
-</record>
-
-<record>
-<bibcode>2012arXiv1211.4522S</bibcode>
-<title>An analytical phase-space model for tidal caustics</title>
-<author>Sanderson, Robyn E.</author>
-<author>Helmi, Amina</author>
-<journal>eprint arXiv:1211.4522</journal>
-<pubdate>Nov 2012</pubdate>
-<link type="ABSTRACT">
-  <name>Abstract</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012arXiv1211.4522S&#38;link_type=ABSTRACT</url>
-</link>
-<link type="PREPRINT" access="open">
-  <name>arXiv e-print</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012arXiv1211.4522S&#38;link_type=PREPRINT</url>
-</link>
-<link type="REFERENCES">
-  <name>References in the Article</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012arXiv1211.4522S&#38;link_type=REFERENCES</url>
-  <count>33</count>
-</link>
-<link type="AR">
-  <name>Also-Read Articles</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012arXiv1211.4522S&#38;link_type=AR</url>
-</link>
-<score>1.000</score>
-<eprintid>arXiv:1211.4522</eprintid>
-</record>
-
-<record>
-<bibcode>2012A&amp;A...545A..33E</bibcode>
-<title>Quadruple-peaked spectral line profiles as a tool to constrain gravitational potential of shell galaxies</title>
-<author>Ebrová, I.</author>
-<author>Jílková, L.</author>
-<author>Jungwiert, B.</author>
-<author>Křížek, M.</author>
-<author>Bílek, M.</author>
-<author>Bartošková, K.</author>
-<author>Skalická, T.</author>
-<author>Stoklasová, I.</author>
-<journal>Astronomy &#38; Astrophysics, Volume 545, id.A33, 15 pp.</journal>
-<pubdate>Sep 2012</pubdate>
-<link type="ABSTRACT">
-  <name>Abstract</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=ABSTRACT</url>
-</link>
-<link type="EJOURNAL">
-  <name>Electronic On-line Article (HTML)</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=EJOURNAL</url>
-</link>
-<link type="ARTICLE">
-  <name>Full Printable Article (PDF/Postscript)</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=ARTICLE</url>
-</link>
-<link type="PREPRINT" access="open">
-  <name>arXiv e-print</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=PREPRINT</url>
-</link>
-<link type="REFERENCES">
-  <name>References in the Article</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=REFERENCES</url>
-  <count>63</count>
-</link>
-<link type="CITATIONS">
-  <name>Citations to the Article</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=CITATIONS</url>
-  <count>1</count>
-</link>
-<link type="REFCIT">
-  <name>Refereed Citations to the Article</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=REFCIT</url>
-</link>
-<link type="SIMBAD">
-  <name>SIMBAD Objects</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=SIMBAD</url>
-  <count>6</count>
-</link>
-<link type="AR">
-  <name>Also-Read Articles</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=AR</url>
-</link>
-<link type="OPENURL">
-  <name>Library Link Server</name>
-  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=OPENURL</url>
-</link>
-<score>1.000</score>
-<citations>1</citations>
-<DOI>10.1051/0004-6361/201219940</DOI>
-<eprintid>arXiv:1207.0642</eprintid>
-</record>
-
-</records>
-"""
-
-
 mirrors = [
 ('Harvard-Smithsonian Center for Astrophysics, Cambridge, USA',
   'http://adsabs.harvard.edu'),
@@ -319,6 +32,15 @@ mirrors = [
  ('South African Astronomical Observatory', 'http://saaoads.chpc.ac.za'),
  ('Observatorio Nacional, Rio de Janeiro, Brazil', 'http://ads.on.br')
  ]
+
+weekdaynumtostr = {0: 'Mon',
+                   1: 'Tue',
+                   2: 'Wed',
+                   3: 'Thu',
+                   4: 'Fri',
+                   5: 'Sat',
+                   6: 'Sun'
+                  }
 
 
 def query_ads_for_citations_from_arxiv_ids(ids, adsurl='http://adsabs.harvard.edu', nperquery=100, waittime=30):
@@ -486,15 +208,6 @@ def populate_mongodb_from_arxiv_reclists(reclistfns, dbname='citestats',
                      'Nov': 11,
                      'Dec': 12}
 
-    weekdaynumtostr = {0: 'Mon',
-                       1: 'Tue',
-                       2: 'Wed',
-                       3: 'Thu',
-                       4: 'Fri',
-                       5: 'Sat',
-                       6: 'Sun'
-                      }
-
     if isinstance(reclistfns, basestring):
         reclistfns = glob(reclistfns)
 
@@ -540,8 +253,47 @@ def populate_mongodb_from_arxiv_reclists(reclistfns, dbname='citestats',
         conn.close()
 
 
-def get_data_from_ads(arxivid, adsurl, stdoutqueue=None):
-    raise NotImplementedError
+TIMEOUT_TIMES = 5
+URLOPEN_TIMEOUT = 5  # seconds
+
+
+def get_cite_count_data_from_ads(arxivid, adsurl, stdoutqueue=None):
+    from urllib2 import urlopen, URLError
+    from xml.etree import cElementTree
+
+    url = '{adsurl}/cgi-bin/bib_query?{id}&data_type=SHORT_XML'.format(adsurl=adsurl, id=arxivid)
+    urlobj = None
+    tries = 0
+
+    while True:  # killed by break or URLError
+        tries += 1
+        try:
+            print 'url',url
+            urlobj = urlopen(url, timeout=URLOPEN_TIMEOUT)
+            et = cElementTree.parse(urlobj)
+            break  # out of while loop
+        except URLError:
+            if tries >= TIMEOUT_TIMES:
+                raise
+        finally:
+            if hasattr(urlobj, 'close'):
+                urlobj.close()
+
+    data = {}
+    citeelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}citations')
+    if citeelem is not None:
+        data['ncites'] = int(citeelem.itertext().next())
+    bibcodeelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}bibcode')
+    if bibcodeelem is not None:
+        data['bibcode'] = bibcodeelem.itertext().next()
+    titleelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}title')
+    if titleelem is not None:
+        data['title'] = titleelem.itertext().next()
+    authorelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}author')
+    if authorelem is not None:
+        data['fauthor'] = authorelem.itertext().next()
+
+    return data
 
 
 EMPTY_TIMES = 5
@@ -574,8 +326,9 @@ def process_data_from_ads(arxividqueue, stdoutqueue, adsurl, dbname, collname, q
                     return
 
                 sttime = time.time()
-                data = get_data_from_ads(aid, adsurl, stdoutqueue)
-                coll.update({'arxiv_id': aid}, {'$set': data})
+                data = get_cite_count_data_from_ads(aid, adsurl, stdoutqueue)
+                stdoutqueue.put('WOULD HAVE WRITTEN:' + str(data))
+                #coll.update({'arxiv_id': aid}, {'$set': data})
                 endtime = time.time()
 
                 if stdoutqueue is not None:
@@ -597,9 +350,10 @@ def process_data_from_ads(arxividqueue, stdoutqueue, adsurl, dbname, collname, q
 
 
 def run_ads_queries(dbname='citestats', collname='astroph', verbose=True,
-                    mirrors=mirrors, querywaittime=30, mainloopwaittime=1):
+                    mirrorurls=[m[1] for m in mirrors], querywaittime=30,
+                    mainloopwaittime=1):
     """
-    Runs the query over the given `mirrors` (should be valid URLs)
+    Runs the query over the given `mirrorurls` (should be valid URLs)
     """
     import time
     from multiprocessing import Process, Queue
@@ -636,11 +390,11 @@ def run_ads_queries(dbname='citestats', collname='astroph', verbose=True,
     sttime = time.time()
 
     #these are the markers that indicate it's time to quit
-    for m in mirrors:
+    for m in mirrorurls:
         aidstoquerylst.insert(0, 'done')
 
     try:  # be sure to kill the processes even if an exception arises
-        for m in mirrors:
+        for m in mirrorurls:
             p = Process(target=process_data_from_ads, args=(arxividqueue,
                 stdoutqueue, m, dbname, collname, querywaittime))
             procs.append(p)
@@ -688,3 +442,292 @@ def run_ads_queries(dbname='citestats', collname='astroph', verbose=True,
                 if verbose:
                     print 'Terminating process', p.pid
                 p.terminate()
+
+# Below is a bunch of info text
+#--------------------------------
+
+ipblockinfo = """
+Thanks for the email.  The ip block is triggered automatically by "too
+many in too short a time period" where, understandably, we don't want
+to advertise that rate.  If you put 30 seconds between queries, you'll
+probably avoid the block.  You can also spread out your searches over
+multiple mirrors which will allow you to get results back quicker...
+
+Last, if you do trigger the block, just let us know (ads@cfa.harvard.edu
+is fine for correspondence), and we'll unblock you.
+"""
+
+
+_exampleurl = "http://adsabs.harvard.edu/cgi-bin/nph-abs_connect?db_key=ALL&warnings=YES&version=1&bibcode=arXiv%3A1302.1193%0D%0AarXiv%3A1302.1160&nr_to_return=100&start_nr=1"
+_parsesto = """
+{'bibcode': ['arXiv:1302.1193\r\narXiv:1302.1160'],
+ 'http://adsabs.harvard.edu/cgi-bin/nph-abs_connect?db_key': ['ALL'],
+ 'nr_to_return': ['100'],
+ 'start_nr': ['1'],
+ 'version': ['1'],
+ 'warnings': ['YES']}
+ """
+
+_betterexample = 'http://adsabs.harvard.edu/cgi-bin/nph-abs_connect?db_key=ALL&warnings=YES&version=1&bibcode=arXiv%3Aastro-ph/0309704%0D%0AarXiv%3A1302.1160&data_type=Custom&format=%25c&nr_to_return=100&start_nr=1'
+_parsesto = """
+{'bibcode': ['arXiv:astro-ph/0309704\r\narXiv:1302.1160'],
+ 'data_type': ['Custom'],
+ 'format': ['%c'],
+ 'http://adsabs.harvard.edu/cgi-bin/nph-abs_connect?db_key': ['ALL'],
+ 'nr_to_return': ['100'],
+ 'start_nr': ['1'],
+ 'version': ['1'],
+ 'warnings': ['YES']}
+"""
+
+"""
+Custom "%Q %c" yields:
+Query Results from the ADS Database
+
+
+Retrieved 3 abstracts, starting with number 1.  Total number selected: 3.
+
+eprint arXiv:1302.1160 0
+
+eprint arXiv:1112.1067 0
+
+eprint arXiv:astro-ph/0309704 0
+"""
+
+_absexample = "http://adsabs.harvard.edu/cgi-bin/bib_query?arXiv:1206.2619&data_type=SHORT_XML"
+_yields = """
+<?xml version="1.0"?>
+<records xmlns="http://ads.harvard.edu/schema/abs/1.1/references" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://ads.harvard.edu/schema/abs/1.1/references http://ads.harvard.edu/schema/abs/1.1/references.xsd" retrieved="1" start="1" selected="1">
+<record>
+<bibcode>2012MNRAS.423.3134F</bibcode>
+<title>A spectroscopic survey of Andromeda's Western Shelf</title>
+<author>Fardal, Mark A.</author>
+<author>Guhathakurta, Puragra</author>
+<author>Gilbert, Karoline M.</author>
+<author>Tollerud, Erik J.</author>
+<author>Kalirai, Jason S.</author>
+<author>Tanaka, Mikito</author>
+<author>Beaton, Rachael</author>
+<author>Chiba, Masashi</author>
+<author>Komiyama, Yutaka</author>
+<author>Iye, Masanori</author>
+<journal>Monthly Notices of the Royal Astronomical Society, Volume 423, Issue 4, pp. 3134-3147.</journal>
+<pubdate>Jul 2012</pubdate>
+<link type="ABSTRACT">
+  <name>Abstract</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=ABSTRACT</url>
+</link>
+<link type="EJOURNAL">
+  <name>Electronic On-line Article (HTML)</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=EJOURNAL</url>
+</link>
+<link type="ARTICLE">
+  <name>Full Printable Article (PDF/Postscript)</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=ARTICLE</url>
+</link>
+<link type="PREPRINT" access="open">
+  <name>arXiv e-print</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=PREPRINT</url>
+</link>
+<link type="REFERENCES">
+  <name>References in the Article</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=REFERENCES</url>
+  <count>49</count>
+</link>
+<link type="CITATIONS">
+  <name>Citations to the Article</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=CITATIONS</url>
+  <count>3</count>
+</link>
+<link type="REFCIT">
+  <name>Refereed Citations to the Article</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=REFCIT</url>
+</link>
+<link type="SIMBAD">
+  <name>SIMBAD Objects</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=SIMBAD</url>
+  <count>1</count>
+</link>
+<link type="AR">
+  <name>Also-Read Articles</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=AR</url>
+</link>
+<link type="OPENURL">
+  <name>Library Link Server</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012MNRAS.423.3134F&#38;link_type=OPENURL</url>
+</link>
+<score>1.000</score>
+<citations>3</citations>
+<DOI>10.1111/j.1365-2966.2012.21094.x</DOI>
+<eprintid>arXiv:1206.2619</eprintid>
+</record>
+
+</records>
+
+"""
+
+_cite_query = 'http://adsabs.harvard.edu/cgi-bin/nph-ref_query?bibcode=2012MNRAS.423.3134F&amp;refs=CITATIONS&amp;db_key=AST&data_type=SHORT_XML'
+_result = """
+<?xml version="1.0"?>
+<records xmlns="http://ads.harvard.edu/schema/abs/1.1/references" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://ads.harvard.edu/schema/abs/1.1/references http://ads.harvard.edu/schema/abs/1.1/references.xsd" retrieved="3" start="1" selected="3">
+<record>
+<bibcode>2013ApJ...763....4L</bibcode>
+<title>PAndAS in the Mist: The Stellar and Gaseous Mass within the Halos of M31 and M33</title>
+<author>Lewis, Geraint F.</author>
+<author>Braun, Robert</author>
+<author>McConnachie, Alan W.</author>
+<author>Irwin, Michael J.</author>
+<author>Ibata, Rodrigo A.</author>
+<author>Chapman, Scott C.</author>
+<author>Ferguson, Annette M. N.</author>
+<author>Martin, Nicolas F.</author>
+<author>Fardal, Mark</author>
+<author>Dubinski, John</author>
+<author>Widrow, Larry</author>
+<author>Dougal Mackey, A.</author>
+<author>Babul, Arif</author>
+<author>Tanvir, Nial R.</author>
+<author>Rich, Michael</author>
+<journal>The Astrophysical Journal, Volume 763, Issue 1, article id. 4, 10 pp. (2013).</journal>
+<pubdate>Jan 2013</pubdate>
+<link type="ABSTRACT">
+  <name>Abstract</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=ABSTRACT</url>
+</link>
+<link type="EJOURNAL">
+  <name>Electronic On-line Article (HTML)</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=EJOURNAL</url>
+</link>
+<link type="ARTICLE">
+  <name>Full Printable Article (PDF/Postscript)</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=ARTICLE</url>
+</link>
+<link type="PREPRINT" access="open">
+  <name>arXiv e-print</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=PREPRINT</url>
+</link>
+<link type="REFERENCES">
+  <name>References in the Article</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=REFERENCES</url>
+  <count>74</count>
+</link>
+<link type="CITATIONS">
+  <name>Citations to the Article</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=CITATIONS</url>
+  <count>1</count>
+</link>
+<link type="REFCIT">
+  <name>Refereed Citations to the Article</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=REFCIT</url>
+</link>
+<link type="SIMBAD">
+  <name>SIMBAD Objects</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=SIMBAD</url>
+  <count>2</count>
+</link>
+<link type="AR">
+  <name>Also-Read Articles</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=AR</url>
+</link>
+<link type="OPENURL">
+  <name>Library Link Server</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2013ApJ...763....4L&#38;link_type=OPENURL</url>
+</link>
+<score>1.000</score>
+<citations>1</citations>
+<DOI>10.1088/0004-637X/763/1/4</DOI>
+<eprintid>arXiv:1211.4059</eprintid>
+</record>
+
+<record>
+<bibcode>2012arXiv1211.4522S</bibcode>
+<title>An analytical phase-space model for tidal caustics</title>
+<author>Sanderson, Robyn E.</author>
+<author>Helmi, Amina</author>
+<journal>eprint arXiv:1211.4522</journal>
+<pubdate>Nov 2012</pubdate>
+<link type="ABSTRACT">
+  <name>Abstract</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012arXiv1211.4522S&#38;link_type=ABSTRACT</url>
+</link>
+<link type="PREPRINT" access="open">
+  <name>arXiv e-print</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012arXiv1211.4522S&#38;link_type=PREPRINT</url>
+</link>
+<link type="REFERENCES">
+  <name>References in the Article</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012arXiv1211.4522S&#38;link_type=REFERENCES</url>
+  <count>33</count>
+</link>
+<link type="AR">
+  <name>Also-Read Articles</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012arXiv1211.4522S&#38;link_type=AR</url>
+</link>
+<score>1.000</score>
+<eprintid>arXiv:1211.4522</eprintid>
+</record>
+
+<record>
+<bibcode>2012A&amp;A...545A..33E</bibcode>
+<title>Quadruple-peaked spectral line profiles as a tool to constrain gravitational potential of shell galaxies</title>
+<author>Ebrová, I.</author>
+<author>Jílková, L.</author>
+<author>Jungwiert, B.</author>
+<author>Křížek, M.</author>
+<author>Bílek, M.</author>
+<author>Bartošková, K.</author>
+<author>Skalická, T.</author>
+<author>Stoklasová, I.</author>
+<journal>Astronomy &#38; Astrophysics, Volume 545, id.A33, 15 pp.</journal>
+<pubdate>Sep 2012</pubdate>
+<link type="ABSTRACT">
+  <name>Abstract</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=ABSTRACT</url>
+</link>
+<link type="EJOURNAL">
+  <name>Electronic On-line Article (HTML)</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=EJOURNAL</url>
+</link>
+<link type="ARTICLE">
+  <name>Full Printable Article (PDF/Postscript)</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=ARTICLE</url>
+</link>
+<link type="PREPRINT" access="open">
+  <name>arXiv e-print</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=PREPRINT</url>
+</link>
+<link type="REFERENCES">
+  <name>References in the Article</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=REFERENCES</url>
+  <count>63</count>
+</link>
+<link type="CITATIONS">
+  <name>Citations to the Article</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=CITATIONS</url>
+  <count>1</count>
+</link>
+<link type="REFCIT">
+  <name>Refereed Citations to the Article</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=REFCIT</url>
+</link>
+<link type="SIMBAD">
+  <name>SIMBAD Objects</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=SIMBAD</url>
+  <count>6</count>
+</link>
+<link type="AR">
+  <name>Also-Read Articles</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=AR</url>
+</link>
+<link type="OPENURL">
+  <name>Library Link Server</name>
+  <url>http://adsabs.harvard.edu/cgi-bin/nph-data_query?bibcode=2012A%26A...545A..33E&#38;link_type=OPENURL</url>
+</link>
+<score>1.000</score>
+<citations>1</citations>
+<DOI>10.1051/0004-6361/201219940</DOI>
+<eprintid>arXiv:1207.0642</eprintid>
+</record>
+
+</records>
+"""
