@@ -540,22 +540,151 @@ def populate_mongodb_from_arxiv_reclists(reclistfns, dbname='citestats',
         conn.close()
 
 
-def get_data_from_ads(adsurl, arxivid):
+def get_data_from_ads(arxivid, adsurl, stdoutqueue=None):
     raise NotImplementedError
 
 
-def update_record_from_ads(coll, aid, data):
-    return coll.update({'arxiv_id': aid}, {'$set': data})
+EMPTY_TIMES = 5
+EMPTY_PROC_WAITTIME = 1
 
 
-def run_ads_queries(dbname='citestats',
-    collname='astroph', verbose=True):
+def process_data_from_ads(arxividqueue, stdoutqueue, adsurl, dbname, collname, querywaittime):
+    import Queue as queue
+
+    """
+    Meant to be run as a process
+
+    if `stdoutqueue` is None, equivalent of ``not verbose``
+    """
+    from pymongo import MongoClient
+    import time
+
+    conn = MongoClient()
+    coll = conn[dbname][collname]
+    empties = 0
+    try:
+        while True:  # will crap out when 'done' message is received
+            try:
+                aid = arxividqueue.get_nowait()
+                empties = 0
+
+                if aid == 'done':
+                    if stdoutqueue is not None:
+                        stdoutqueue.put('All done! (URL: {0})'.format(adsurl))
+                    return
+
+                sttime = time.time()
+                data = get_data_from_ads(aid, adsurl, stdoutqueue)
+                coll.update({'arxiv_id': aid}, {'$set': data})
+                endtime = time.time()
+
+                if stdoutqueue is not None:
+                    stdoutqueue.put('Query/update for arxiv id "{0}"" took {1} sec. (URL: {2})'.format(aid, endtime - sttime, adsurl))
+
+                #now make sure the waittime has passed before trying again
+                sleeptime = querywaittime - (time.time() - sttime)
+                if sleeptime > 0:
+                    time.sleep(sleeptime)
+            except queue.Empty:
+                empties += 1
+                if empties > EMPTY_TIMES:
+                    if stdoutqueue is not None:
+                        stdoutqueue.put('Input queue was empty {0} times! (URL: {1})'.format(empties, adsurl))
+                    return
+                time.sleep(EMPTY_PROC_WAITTIME)  # wait a second and then check again
+    finally:
+        conn.close()
+
+
+def run_ads_queries(dbname='citestats', collname='astroph', verbose=True,
+                    mirrors=mirrors, querywaittime=30, mainloopwaittime=1):
+    """
+    Runs the query over the given `mirrors` (should be valid URLs)
+    """
+    import time
+    from multiprocessing import Process, Queue
+    import Queue as queue
+
     from pymongo import MongoClient
 
     conn = MongoClient()
     try:
         coll = conn[dbname][collname]
 
-        raise NotImplementedError
+        aidstoquerylst = [doc['arxiv_id'] for doc in coll.find() if not 'adsurl' in doc]
+
     finally:
         conn.close()
+
+    if verbose:
+        print '# of ArXiv IDs to query:', len(aidstoquerylst)
+
+    #a queue for the ids, to be processed by the workers
+    arxividqueue = Queue()
+    #we can't fill this totally on Mac OS X because it has a very limited queue size
+    try:
+        while len(aidstoquerylst) > 0:
+            arxividqueue.put_nowait(aidstoquerylst.pop())
+    except queue.Full:
+
+        pass  # this is ok because we try to populate it more below in the main loop
+
+    #a queue for stdout messages from the workers
+    stdoutqueue = Queue() if verbose else None
+
+    procs = []
+    sttime = time.time()
+
+    #these are the markers that indicate it's time to quit
+    for m in mirrors:
+        aidstoquerylst.insert(0, 'done')
+
+    try:  # be sure to kill the processes even if an exception arises
+        for m in mirrors:
+            p = Process(target=process_data_from_ads, args=(arxividqueue,
+                stdoutqueue, m, dbname, collname, querywaittime))
+            procs.append(p)
+            p.start()
+            if verbose:
+                print 'Started process', p.pid
+
+        #run the primary loop that polls stdout and full populates the input queue
+        while len(aidstoquerylst) > 0 or not arxividqueue.empty():  # this is not reliable, but is an ok first guess
+            #first try to dump from the id list
+            try:
+                while len(aidstoquerylst) > 0:
+                    arxividqueue.put_nowait(aidstoquerylst.pop())
+            except queue.Full:
+                pass  # will try next time around
+
+            try:
+                while True:  # will drop out when stdoutqueue is empty
+                    print stdoutqueue.get_nowait()
+            except queue.Empty:
+                time.sleep(mainloopwaittime)
+
+            if not any([p.is_alive() for p in procs]) and not arxividqueue.empty():
+                print 'Some procs terminated before completion!'
+                break
+
+        #the arxividqueue is empty, so we should be finishing up.
+        for p in procs:
+            p.join()
+
+            #empty out any messages
+            try:
+                while True:  # will droup out when stdoutqueue is empty
+                    print stdoutqueue.get_nowait()
+            except queue.Empty:
+                pass
+
+        endtime = time.time()
+        if verbose:
+            print 'Total time', (endtime - sttime) / 3600, 'hrs'
+
+    finally:  # at the end always make sure everything is dead
+        for p in procs:
+            if p.is_alive():
+                if verbose:
+                    print 'Terminating process', p.pid
+                p.terminate()
