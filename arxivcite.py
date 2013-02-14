@@ -9,26 +9,18 @@ A module to query arxiv and match to ADS for citation statistics.
 from arxivoai2 import arxivoai2
 
 mirrors = [
-('Harvard-Smithsonian Center for Astrophysics, Cambridge, USA',
-  'http://adsabs.harvard.edu'),
- ('Centre de Donnes astronomiques de Strasbourg, France',
-  'http://cdsads.u-strasbg.fr'),
+ ('Harvard-Smithsonian Center for Astrophysics, Cambridge, USA', 'http://adsabs.harvard.edu'),
+ ('Centre de Donnes astronomiques de Strasbourg, France', 'http://cdsads.u-strasbg.fr'),
  ('University of Nottingham, United Kingdom', 'http://ukads.nottingham.ac.uk'),
  ('European Southern Observatory, Garching, Germany', 'http://esoads.eso.org'),
- ('Astronomisches Rechen-Institut, Heidelberg, Germany',
-  'http://ads.ari.uni-heidelberg.de'),
- ('Institute of Astronomy of the Russian Academy of Sciences, Moscow, Russia',
-  'http://ads.inasan.ru'),
+ ('Astronomisches Rechen-Institut, Heidelberg, Germany', 'http://ads.ari.uni-heidelberg.de'),
+ ('Institute of Astronomy of the Russian Academy of Sciences, Moscow, Russia', 'http://ads.inasan.ru'),
  ('Main Astronomical Observatory, Kiev, Ukraine', 'http://ads.mao.kiev.ua'),
- ('Pontificia Universidad Catolica, Santiago, Chile',
-  'http://ads.astro.puc.cl'),
+ ('Pontificia Universidad Catolica, Santiago, Chile', 'http://ads.astro.puc.cl'),
  ('National Astronomical Observatory, Tokyo, Japan', 'http://ads.nao.ac.jp'),
- ('National Astronomical Observatory, Chinese Academy of Science, Beijing, China',
-  'http://ads.bao.ac.cn'),
- ('Inter-University Centre for Astronomy and Astrophysics, Pune, India',
-  'http://ads.iucaa.ernet.in'),
- ('Indonesian Institute of Sciences, Jakarta, Indonesia',
-  'http://ads.arsip.lipi.go.id'),
+ ('National Astronomical Observatory, Chinese Academy of Science, Beijing, China', 'http://ads.bao.ac.cn'),
+ #('Inter-University Centre for Astronomy and Astrophysics, Pune, India', 'http://ads.iucaa.ernet.in'),
+ ('Indonesian Institute of Sciences, Jakarta, Indonesia',' http://ads.arsip.lipi.go.id'),
  ('South African Astronomical Observatory', 'http://saaoads.chpc.ac.za'),
  ('Observatorio Nacional, Rio de Janeiro, Brazil', 'http://ads.on.br')
  ]
@@ -265,10 +257,12 @@ def get_cite_count_data_from_ads(arxivid, adsurl, stdoutqueue=None):
     urlobj = None
     tries = 0
 
+    if stdoutqueue is not None:
+        stdoutqueue.put('Attempting to query ' + url)
+
     while True:  # killed by break or URLError
         tries += 1
         try:
-            print 'url',url
             urlobj = urlopen(url, timeout=URLOPEN_TIMEOUT)
             et = cElementTree.parse(urlobj)
             break  # out of while loop
@@ -327,12 +321,12 @@ def process_data_from_ads(arxividqueue, stdoutqueue, adsurl, dbname, collname, q
 
                 sttime = time.time()
                 data = get_cite_count_data_from_ads(aid, adsurl, stdoutqueue)
-                stdoutqueue.put('WOULD HAVE WRITTEN:' + str(data))
-                #coll.update({'arxiv_id': aid}, {'$set': data})
+                coll.update({'arxiv_id': aid}, {'$set': data})
                 endtime = time.time()
 
                 if stdoutqueue is not None:
-                    stdoutqueue.put('Query/update for arxiv id "{0}"" took {1} sec. (URL: {2})'.format(aid, endtime - sttime, adsurl))
+                    msg = 'Query/update for arxiv id "{0}"" took {1} sec. Waiting for ~ {2} sec. (URL: {3})'
+                    stdoutqueue.put(msg.format(aid, endtime - sttime, querywaittime - (time.time() - sttime), adsurl))
 
                 #now make sure the waittime has passed before trying again
                 sleeptime = querywaittime - (time.time() - sttime)
@@ -365,7 +359,7 @@ def run_ads_queries(dbname='citestats', collname='astroph', verbose=True,
     try:
         coll = conn[dbname][collname]
 
-        aidstoquerylst = [doc['arxiv_id'] for doc in coll.find() if not 'adsurl' in doc]
+        aidstoquerylst = [doc['arxiv_id'] for doc in coll.find() if not 'bibcode' in doc]
 
     finally:
         conn.close()
@@ -439,8 +433,7 @@ def run_ads_queries(dbname='citestats', collname='astroph', verbose=True,
     finally:  # at the end always make sure everything is dead
         for p in procs:
             if p.is_alive():
-                if verbose:
-                    print 'Terminating process', p.pid
+                print 'Terminating process', p.pid
                 p.terminate()
 
 # Below is a bunch of info text
