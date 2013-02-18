@@ -250,7 +250,7 @@ TIMEOUT_TIMES = 5
 URLOPEN_TIMEOUT = 5  # seconds
 
 
-def get_cite_count_data_from_ads(arxivid, adsurl, stdoutqueue=None):
+def get_cite_count_data_from_ads(arxivid, adsurl):
     """
     This gets run from process_data_from_ads
     """
@@ -260,9 +260,6 @@ def get_cite_count_data_from_ads(arxivid, adsurl, stdoutqueue=None):
     url = '{adsurl}/cgi-bin/bib_query?{id}&data_type=SHORT_XML'.format(adsurl=adsurl, id=arxivid)
     urlobj = None
     tries = 0
-
-    if stdoutqueue is not None:
-        stdoutqueue.put('Attempting to query {0} (ADSURL: {1})'.format(url, adsurl))
 
     while True:  # killed by break or URLError
         tries += 1
@@ -302,205 +299,246 @@ def get_cite_count_data_from_ads(arxivid, adsurl, stdoutqueue=None):
     return data
 
 
-EMPTY_TIMES = 5
-EMPTY_PROC_WAITTIME = 1
-
-
-def process_data_from_ads(arxividqueue, stdoutqueue, adsurl, dbname, collname, querywaittime):
+def cite_count_proc(arxivid, adsurl, dbname, collname, waittime, laststarttime, outqueue):
     """
-    Meant to be run as a child process
-
-    if `stdoutqueue` is None, equivalent of ``not verbose``
+    This is run by ADSMirror as a subprocess
     """
     from pymongo import MongoClient
     import time
 
-    conn = MongoClient()
-    coll = conn[dbname][collname]
-    empties = 0
     try:
-        while True:  # will crap out when 'done' message is received
-            try:
-                aid = arxividqueue.get_nowait()
-                empties = 0
+        dtime = time.time() - laststarttime
+        if dtime < waittime:
+            time.sleep(waittime - dtime)
+    except BaseException as e:
+        outqueue.put('error (while sleeping)')
+        outqueue.put(laststarttime)
+        outqueue.put(e)
+        return
 
-                if aid == 'done':
-                    if stdoutqueue is not None:
-                        stdoutqueue.put('All done! (ADSURL: {0})'.format(adsurl))
-                    return
-
-                sttime = time.time()
-                data = get_cite_count_data_from_ads(aid, adsurl, stdoutqueue)
-                coll.update({'arxiv_id': aid}, {'$set': data})
-                endtime = time.time()
-
-                if stdoutqueue is not None:
-                    msg = 'Query/update for arxiv id "{0}"" took {1} sec. Waiting for ~ {2} sec. (ADSURL: {3})'
-                    stdoutqueue.put(msg.format(aid, endtime - sttime, querywaittime - (time.time() - sttime), adsurl))
-
-                #now make sure the waittime has passed before trying again
-                sleeptime = querywaittime - (time.time() - sttime)
-                if sleeptime > 0:
-                    time.sleep(sleeptime)
-            except queue.Empty:
-                empties += 1
-                if empties > EMPTY_TIMES:
-                    if stdoutqueue is not None:
-                        stdoutqueue.put('Input queue was empty {0} times! (ADSURL: {1})'.format(empties, adsurl))
-                    return
-                time.sleep(EMPTY_PROC_WAITTIME)  # wait a second and then check again
-    finally:
-        conn.close()
-
-
-# a regular expression for filtering stdout - anything that matches is ignored
-STDOUTFILTERRE = '(Attempting|Query/update).*'
-
-
-def run_ads_queries(dbname='citestats', collname='astroph', verbose=True,
-                    mirrorurls=[m[1] for m in mirrors], querywaittime=30,
-                    mainloopwaittime=1, statusinfoperiod=1, doexit=False,
-                    overwrite=False):
-    """
-    Runs the query over the given `mirrorurls` (should be valid URLs)
-
-    `statusinfoperiod` is the time (in min) between printings of progress/status
-    updates. 0 means don't do any.
-
-    `overwrite` means ignore which ones already have an ADS entry
-    """
-    import time
-    import sys
-    import re
-    from multiprocessing import Process, Queue
-
-    from pymongo import MongoClient
-
-    stdoutfilter = re.compile(STDOUTFILTERRE)
-
-    conn = MongoClient()
+    qstarttime = time.time()
     try:
+        data = get_cite_count_data_from_ads(arxivid, adsurl)
+    except BaseException as e:
+        outqueue.put('error (url)')
+        outqueue.put(qstarttime)
+        outqueue.put(e)
+        return
+
+    conn = None
+    try:
+        conn = MongoClient()
         coll = conn[dbname][collname]
 
-        if overwrite:
-            aidstoquerylst = [doc['arxiv_id'] for doc in coll.find()]
-        else:
-            aidstoquerylst = [doc['arxiv_id'] for doc in coll.find() if not 'bibcode' in doc]
-
+        coll.update({'arxiv_id': arxivid}, {'$set': data})
+    except Exception as e:
+        BaseException.put('error (mongo)')
+        outqueue.put(qstarttime)
+        outqueue.put(e)
+        return
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
+    endtime = time.time()
 
-    nstartaids = len(aidstoquerylst)
+    outqueue.put('success')
+    outqueue.put(qstarttime)
+    outqueue.put(endtime - qstarttime)
 
-    if verbose:
-        print '# of ArXiv IDs to query:', nstartaids
 
-    #these are the markers that indicate it's time to quit
-    for m in mirrorurls:
-        aidstoquerylst.insert(0, 'done')
+class ADSMirror(object):
+    def __init__(self, mirrorurl, mirrorname=''):
+        self.url = mirrorurl
+        self.name = mirrorname
 
-    #a queue for the ids, to be processed by the workers
-    arxividqueue = Queue()
-    #we can't fill this totally on Mac OS X because it has a very limited queue size
-    try:
-        while len(aidstoquerylst) > 0:
-            arxividqueue.put_nowait(aidstoquerylst.pop())
-    except queue.Full:
+        self.error = None
+        self.errornoted = False
+        self.currarxivid = None
 
-        pass  # this is ok because we try to populate it more below in the main loop
+        self.prevqtime = -float('inf')  # the time the last query finished
+        self.processingtime = []
 
-    #a queue for stdout messages from the workers
-    stdoutqueue = Queue() if verbose else None
+        self.proc = self.queue = None
 
-    procs = []
-    sttime = time.time()
-    try:  # be sure to kill the processes even if an exception arises
-        for m in mirrorurls:
-            p = Process(target=process_data_from_ads, args=(arxividqueue,
-                stdoutqueue, m, dbname, collname, querywaittime))
-            procs.append(p)
-            p.start()
-            if verbose:
-                print 'Started process', p.pid
+    @property
+    def readablename(self):
+        return self.url if self.name == '' else self.name
 
-        laststatustime = -float('inf')  # used for figuring out when the status updae should appear
+    def __repr__(self):
+        return '<ADSMirror: "{0}">'.format(self.readablename)
 
-        #run the primary loop that polls stdout and full populates the input queue
-        while len(aidstoquerylst) > 0 or not arxividqueue.empty():  # this is not reliable, but is an ok first guess
-            #first try to dump from the id list
+    def clear_error(self):
+        self.error = None
+        self.errornoted = False
+
+    def set_error(self, error):
+        self.error = error
+        self.errornoted = False
+
+    def spawn_arxiv_proc(self, arxivid, dbname, collname, waittime):
+        """
+        Does the work for this mirror, including waiting until the given
+        `waittime` has passed.
+
+        If it errors, will set self.error to whatever the error was
+        """
+        from multiprocessing import Process, Queue
+
+        if not self.check_ready():
+            raise ValueError('Cannot spawn arxiv process if not ready')
+
+        self.currarxivid = arxivid
+
+        self.queue = Queue()
+        self.proc = Process(target=cite_count_proc, args=(arxivid, self.url, dbname, collname, waittime, self.prevqtime, self.queue))
+        self.proc.start()
+
+    def check_ready(self):
+        """
+        returns True if the process is ready, False otherwise.
+        Also retrieves queue info and joins
+        """
+        if self.proc is not None:
+            if self.proc.is_alive():
+                return False
+            else:
+                self.proc.join()
+                msg = self.queue.get_nowait()
+                self.prevqtime = self.queue.get_nowait()
+                if msg == 'success':
+                    self.currarxivid = None
+                    self.processingtime.append(self.queue.get_nowait())
+                if msg.startswith('error'):
+                    self.error = (msg, self.queue.get_nowait())
+                self.proc = None
+        return self.error is None  # ready if proc is None and there is no error
+
+    def terminate_proc(self):
+        if self.proc is not None:
             try:
-                valtoput = None
-                while len(aidstoquerylst) > 0:
-                    valtoput = aidstoquerylst.pop()
-                    arxividqueue.put_nowait(valtoput)
-                    valtoput = None
-            except queue.Full:
-                if valtoput is not None:
-                    aidstoquerylst.append(valtoput)
+                rdy = self.check_ready()
+            except:
+                #probably a queue problem
+                rdy = None
+            if not rdy:
+                self.proc.terminate()
+                self.proc.join()  # de-zombify
+            self.proc = None
 
-            print_filtered_stdout(stdoutqueue, None if verbose == 'all' else stdoutfilter, mainloopwaittime)
+    def time_stats(self):
+        import numpy as np
 
-            nprocsalive = sum([p.is_alive() for p in procs])
+        arr = np.array(self.processingtime)
+        return arr.mean(), arr.std(), arr
 
-            if nprocsalive == 0 and not arxividqueue.empty():
-                print 'Procs terminated before queue is empty!'
-                break
 
-            if mainloopwaittime > 0 and (time.time() - laststatustime) / 60. > mainloopwaittime:
-                try:
-                    ncurraids = len(aidstoquerylst) + arxividqueue.qsize()
-                except NotImplementedError:  # broken qsize on Mac OS X
-                    ncurraids = len(aidstoquerylst) + arxividqueue._maxsize
+class ADSQuerier(object):
+    def __init__(self, dbname='citestats', collname='astroph',
+                 mirrorurls=mirrors, querywaittime=30,
+                 overwritedb=False, mainloopsleeptime=1,
+                 statuslinewaittime=120):
 
+        self.dbname = dbname
+        self.collname = collname
+        self.querywaittime = querywaittime
+        self.overwritedb = overwritedb
+        self.mainloopsleeptime = mainloopsleeptime
+        self.statuslinewaittime = statuslinewaittime
+
+        self.mirrors = []
+        for m in mirrorurls:
+            if isinstance(m, basestring):  # just URL
+                self.mirrors.append(ADSMirror(m))
+            else:  # (name, URL) tuple
+                self.mirrors.append(ADSMirror(m[1], m[0]))
+
+    def main_loop(self, launchspread=0):
+        import time
+        from pymongo import MongoClient
+
+        conn = MongoClient()
+        try:
+            coll = conn[self.dbname][self.collname]
+
+            if self.overwritedb:
+                aidstoquery = [doc['arxiv_id'] for doc in coll.find()]
+            else:
+                aidstoquery = [doc['arxiv_id'] for doc in coll.find() if not 'bibcode' in doc]
+
+        finally:
+            conn.close()
+
+        nstart = len(aidstoquery)
+        print '# of IDs to start with:', nstart
+
+        laststatustime = -float('inf')
+        sttime = time.time()
+        launched = False
+        while len(aidstoquery) > 0 or any([m.currarxivid is not None for m in self.mirrors]):
+            #check if each mirror is available, try to give a job, if not check for errors
+            allerrored = True
+            for m in self.mirrors:
+                if m.check_ready():
+                    if not launched:
+                        time.sleep(launchspread)
+                    aid = aidstoquery.pop()
+                    m.spawn_arxiv_proc(aid, self.dbname, self.collname, self.querywaittime)
+                    allerrored = False
+                elif m.error is None:
+                    allerrored = False
+                else:  # error is not None
+                    if not m.errornoted:
+                        print 'Error for mirror', m
+                        print 'Error content:', m.error
+                        m.errornoted = True
+                    if m.currarxivid is not None:
+                        aidstoquery.append(m.currarxivid)
+                        m.currarxivid = None
+            if allerrored:
+                print 'All mirrors in error state!  Dropping out of main loop'
+                return
+
+            launched = True
+
+            if (time.time() - laststatustime) >= self.statuslinewaittime:
                 elapsedhr = (time.time() - sttime) / 3600.
-                idsperhour = (nstartaids - ncurraids) / elapsedhr
-                remhr = ncurraids / idsperhour
-
-                msg = 'STATUS UPDATE: Of {0} initial arXiv ids, ~{1} remain.  {2} hours elapsed, ~{3} remaining. {4} of original {5} procs still alive.'
-                print msg.format(nstartaids, ncurraids, elapsedhr, remhr, nprocsalive, len(mirrorurls))
+                hrperquery = elapsedhr / (nstart - len(aidstoquery))
+                remhr = hrperquery * len(aidstoquery)
+                msg = 'STATUS: {0} remaining IDs, {1} hr elapsed, ~{2} hr remaining.  {3} (of {4}) mirrors active.'
+                print msg.format(len(aidstoquery), elapsedhr, remhr,
+                                 sum([m.error is None for m in self.mirrors]),
+                                 len(self.mirrors))
                 laststatustime = time.time()
 
-        #end of main loop - the arxividqueue is empty, so we should be finishing up.
-        for p in procs:
-            p.join()
+            time.sleep(self.mainloopsleeptime)
 
-            #empty out any messages
-            print_filtered_stdout(stdoutqueue, None if verbose == 'all' else stdoutfilter)
+    def clear_keyboard_interrupts(self):
+        for m in self.mirrors:
+            m.check_ready()
+            if m.error is not None:
+                if isinstance(m.error[1], KeyboardInterrupt):
+                    m.clear_error()
 
-        endtime = time.time()
-        if verbose:
-            print 'Total time', (endtime - sttime) / 3600, 'hrs'
+    def clear_all_errors(self):
+        for m in self.mirrors:
+            m.check_ready()
+            m.clear_error()
 
-    finally:  # at the end always make sure everything is dead
-        cleanexit = True
-        for p in procs:
-            if p.is_alive():
-                print 'Terminating process', p.pid
-                p.terminate()
-                cleanexit = False
-        if doexit:
-            sys.exit(0 if cleanexit else 1)
+    def mirror_time_stats(self):
+        d = {}
+        for m in self.mirrors:
+            d[m.readablename] = m.time_stats()[:2]
+        return d
 
 
-def print_filtered_stdout(stdoutqueue, stdoutfilter=None, emptywait=0):
-    """
-    Prints everything in the queue until empty
-    """
-    import time
 
-    i = 0
-    try:
-        while True:  # will droup out when stdoutqueue is empty
-            stdoutstr = stdoutqueue.get_nowait()
-            i += 1
-            if stdoutfilter is None or stdoutfilter.match(stdoutstr) is None:
-                print stdoutstr
 
-    except queue.Empty:
-        if emptywait > 0:
-            time.sleep(emptywait)
 
-    return i
+
+
+
+
+
 
 # Below is a bunch of info text
 #--------------------------------
@@ -790,8 +828,4 @@ _result = """
 
 </records>
 """
-
-if __name__ == '__main__':
-    res = raw_input('Running run_ads_queries with defaults (override: o=overwrite, d=debug/verbose):')
-    run_ads_queries(doexit=True, overwrite='o' in res, verbose='all' if 'd' in res else True)
 
