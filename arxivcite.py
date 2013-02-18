@@ -5,7 +5,6 @@ from __future__ import division
 """
 A module to query arxiv and match to ADS for citation statistics.
 """
-import Queue as queue
 
 from arxivoai2 import arxivoai2
 
@@ -21,7 +20,7 @@ mirrors = [
  ('National Astronomical Observatory, Tokyo, Japan', 'http://ads.nao.ac.jp'),
  ('National Astronomical Observatory, Chinese Academy of Science, Beijing, China', 'http://ads.bao.ac.cn'),
  #('Inter-University Centre for Astronomy and Astrophysics, Pune, India', 'http://ads.iucaa.ernet.in'),
- ('Indonesian Institute of Sciences, Jakarta, Indonesia',' http://ads.arsip.lipi.go.id'),
+ ('Indonesian Institute of Sciences, Jakarta, Indonesia', ' http://ads.arsip.lipi.go.id'),
  ('South African Astronomical Observatory', 'http://saaoads.chpc.ac.za'),
  ('Observatorio Nacional, Rio de Janeiro, Brazil', 'http://ads.on.br')
  ]
@@ -246,33 +245,22 @@ def populate_mongodb_from_arxiv_reclists(reclistfns, dbname='citestats',
         conn.close()
 
 
-TIMEOUT_TIMES = 5
-URLOPEN_TIMEOUT = 5  # seconds
-
-
-def get_cite_count_data_from_ads(arxivid, adsurl):
+def get_cite_count_data_from_ads(arxivid, adsurl, urltimeout=5):
     """
     This gets run from process_data_from_ads
     """
-    from urllib2 import urlopen, URLError
+    from urllib2 import urlopen
     from xml.etree import cElementTree
 
     url = '{adsurl}/cgi-bin/bib_query?{id}&data_type=SHORT_XML'.format(adsurl=adsurl, id=arxivid)
     urlobj = None
-    tries = 0
 
-    while True:  # killed by break or URLError
-        tries += 1
-        try:
-            urlobj = urlopen(url, timeout=URLOPEN_TIMEOUT)
-            et = cElementTree.parse(urlobj)
-            break  # out of while loop
-        except URLError:
-            if tries >= TIMEOUT_TIMES:
-                raise
-        finally:
-            if hasattr(urlobj, 'close'):
-                urlobj.close()
+    try:
+        urlobj = urlopen(url, timeout=urltimeout)
+        et = cElementTree.parse(urlobj)
+    finally:
+        if hasattr(urlobj, 'close'):
+            urlobj.close()
 
     data = {}
     citeelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}citations')
@@ -305,24 +293,27 @@ def cite_count_proc(arxivid, adsurl, dbname, collname, waittime, laststarttime, 
     """
     from pymongo import MongoClient
     import time
+    import traceback
 
     try:
         dtime = time.time() - laststarttime
         if dtime < waittime:
             time.sleep(waittime - dtime)
     except BaseException as e:
-        outqueue.put('error (while sleeping)')
+        outqueue.put('error (while sleeping) before ' + arxivid)
         outqueue.put(laststarttime)
         outqueue.put(e)
+        outqueue.put(traceback.format_exc())
         return
 
     qstarttime = time.time()
     try:
         data = get_cite_count_data_from_ads(arxivid, adsurl)
     except BaseException as e:
-        outqueue.put('error (url)')
+        outqueue.put('error (url) while getting ' + arxivid)
         outqueue.put(qstarttime)
         outqueue.put(e)
+        outqueue.put(traceback.format_exc())
         return
 
     conn = None
@@ -332,16 +323,17 @@ def cite_count_proc(arxivid, adsurl, dbname, collname, waittime, laststarttime, 
 
         coll.update({'arxiv_id': arxivid}, {'$set': data})
     except Exception as e:
-        BaseException.put('error (mongo)')
+        BaseException.put('error (mongo) while setting ' + arxivid)
         outqueue.put(qstarttime)
         outqueue.put(e)
+        outqueue.put(traceback.format_exc())
         return
     finally:
         if conn is not None:
             conn.close()
     endtime = time.time()
 
-    outqueue.put('success')
+    outqueue.put('success at doing ' + arxivid)
     outqueue.put(qstarttime)
     outqueue.put(endtime - qstarttime)
 
@@ -351,14 +343,16 @@ class ADSMirror(object):
         self.url = mirrorurl
         self.name = mirrorname
 
+        self.proc = self.queue = None
+
+        self.currarxivid = None
+        self.prevqtime = -float('inf')  # the time the last query finished
+        self.qprocessingtime = []
+        self.qtimestamp = []
+
         self.error = None
         self.errornoted = False
-        self.currarxivid = None
-
-        self.prevqtime = -float('inf')  # the time the last query finished
-        self.processingtime = []
-
-        self.proc = self.queue = None
+        self.timeoutcount = 0
 
     @property
     def readablename(self):
@@ -398,6 +392,8 @@ class ADSMirror(object):
         returns True if the process is ready, False otherwise.
         Also retrieves queue info and joins
         """
+        import datetime
+
         if self.proc is not None:
             if self.proc.is_alive():
                 return False
@@ -405,13 +401,29 @@ class ADSMirror(object):
                 self.proc.join()
                 msg = self.queue.get_nowait()
                 self.prevqtime = self.queue.get_nowait()
-                if msg == 'success':
+                if msg.startswith('success'):
                     self.currarxivid = None
-                    self.processingtime.append(self.queue.get_nowait())
+                    self.qtimestamp.append(datetime.datetime.now())
+                    self.qprocessingtime.append(self.queue.get_nowait())
+                    self.timeoutcount = 0
                 if msg.startswith('error'):
-                    self.error = (msg, self.queue.get_nowait())
+                    error = self.queue.get_nowait()
+                    tb = self.queue.get_nowait()
+                    self.error = (msg, error, tb)
+                    # if a timeout error, increment the count
+                    if self.timed_out():
+                        self.timeoutcount += 1
                 self.proc = None
         return self.error is None  # ready if proc is None and there is no error
+
+    def timed_out(self):
+        """
+        Returns True if there is currently an error caused by a timeout, False
+        otherwise
+        """
+        import socket
+
+        return isinstance(self.error[1], socket.timeout)
 
     def terminate_proc(self):
         if self.proc is not None:
@@ -426,17 +438,19 @@ class ADSMirror(object):
             self.proc = None
 
     def time_stats(self):
-        import numpy as np
+        from numpy import array
 
-        arr = np.array(self.processingtime)
-        return arr.mean(), arr.std(), arr
+        ptarr = array(self.qprocessingtime)
+        tsarr = array(self.qtimestamp, dtype='datetime64')
+
+        return ptarr.mean(), ptarr.std(), ptarr, tsarr
 
 
 class ADSQuerier(object):
     def __init__(self, dbname='citestats', collname='astroph',
-                 mirrorurls=mirrors, querywaittime=30,
-                 overwritedb=False, mainloopsleeptime=1,
-                 statuslinewaittime=120):
+                 mirrorurls=mirrors, querywaittime=30, overwritedb=False,
+                 mainloopsleeptime=1, statuslinewaittime=120,
+                 timeoutwaittime=120, timeoutlimit=5):
 
         self.dbname = dbname
         self.collname = collname
@@ -444,6 +458,8 @@ class ADSQuerier(object):
         self.overwritedb = overwritedb
         self.mainloopsleeptime = mainloopsleeptime
         self.statuslinewaittime = statuslinewaittime
+        self.timeoutwaittime = timeoutwaittime
+        self.timeoutlimit = timeoutlimit
 
         self.mirrors = []
         for m in mirrorurls:
@@ -452,21 +468,25 @@ class ADSQuerier(object):
             else:  # (name, URL) tuple
                 self.mirrors.append(ADSMirror(m[1], m[0]))
 
-    def main_loop(self, launchspread=0):
-        import time
+    def get_arxiv_ids(self, overwrite=False):
         from pymongo import MongoClient
 
         conn = MongoClient()
         try:
             coll = conn[self.dbname][self.collname]
 
-            if self.overwritedb:
-                aidstoquery = [doc['arxiv_id'] for doc in coll.find()]
+            if overwrite:
+                return [doc['arxiv_id'] for doc in coll.find()]
             else:
-                aidstoquery = [doc['arxiv_id'] for doc in coll.find() if not 'bibcode' in doc]
+                return [doc['arxiv_id'] for doc in coll.find() if not 'bibcode' in doc]
 
         finally:
             conn.close()
+
+    def main_loop(self, launchspread=0):
+        import time
+
+        aidstoquery = self.get_arxiv_ids(self.overwritedb)
 
         nstart = len(aidstoquery)
         print '# of IDs to start with:', nstart
@@ -494,6 +514,14 @@ class ADSQuerier(object):
                     if m.currarxivid is not None:
                         aidstoquery.append(m.currarxivid)
                         m.currarxivid = None
+                    if m.timed_out():
+                        if m.timeoutcount < self.timeoutlimit:
+                            print 'Resetting timeout error, but waiting', self.timeoutwaittime, 'sec'
+                            m.clear_error()
+                            # this tricks the mirror into thinking it has to wait `timeoutwaittime` from now
+                            m.prevqtime = time.time() + self.timeoutwaittime - self.querywaittime
+                        else:
+                            print 'Timed out', self.timeoutlimit, 'times - deactivating mirror', self.readablename
             if allerrored:
                 print 'All mirrors in error state!  Dropping out of main loop'
                 return
@@ -828,4 +856,3 @@ _result = """
 
 </records>
 """
-
