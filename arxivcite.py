@@ -521,7 +521,7 @@ class ADSQuerier(object):
                             # this tricks the mirror into thinking it has to wait `timeoutwaittime` from now
                             m.prevqtime = time.time() + self.timeoutwaittime - self.querywaittime
                         else:
-                            print 'Timed out', self.timeoutlimit, 'times - deactivating mirror', self.readablename
+                            print 'Timed out', self.timeoutlimit, 'times - deactivating mirror', m.readablename
             if allerrored:
                 print 'All mirrors in error state!  Dropping out of main loop'
                 return
