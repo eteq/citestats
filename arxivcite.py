@@ -511,21 +511,27 @@ class ADSQuerier(object):
                 elif m.error is None:
                     allerrored = False
                 else:  # error is not None
-                    if not m.errornoted:
-                        print 'Error for mirror', m
-                        print 'Error content:', m.error
-                        m.errornoted = True
+
                     if m.currarxivid is not None:
                         aidstoquery.append(m.currarxivid)
                         m.currarxivid = None
                     if m.timed_out():
                         if m.timeoutcount < self.timeoutlimit:
                             print 'Resetting timeout error, but waiting', self.timeoutwaittime, 'sec'
+                            m.errornoted = True
                             m.clear_error()
                             # this tricks the mirror into thinking it has to wait `timeoutwaittime` from now
                             m.prevqtime = time.time() + self.timeoutwaittime - self.querywaittime
-                        else:
-                            print 'Timed out', self.timeoutlimit, 'times - deactivating mirror', m.readablename
+                        elif m.timeoutcount == self.timeoutlimit:
+                            print 'Timed out', self.timeoutlimit, 'times - DEACTIVATING mirror', m.readablename
+                            m.errornoted = True
+                            m.timeoutcount += 1  # silences future visits
+                    elif not m.errornoted:
+                        print 'Error for mirror', m
+                        print 'Error name:', m.error[0]
+                        print 'Error object:', m.error[1]
+                        print 'Error tb:', m.error[2]
+                        m.errornoted = True
             if allerrored:
                 print 'All mirrors in error state!  Dropping out of main loop'
                 return
