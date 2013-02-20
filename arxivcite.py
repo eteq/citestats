@@ -517,13 +517,13 @@ class ADSQuerier(object):
                         m.currarxivid = None
                     if m.timed_out():
                         if m.timeoutcount < self.timeoutlimit:
-                            print 'Resetting timeout error, but waiting', self.timeoutwaittime, 'sec'
+                            print 'Resetting timeout error on ' + str(m) + ', waiting', self.timeoutwaittime, 'sec. Will allow', self.timeoutlimit - m.timeoutcount, 'more timeouts.'
                             m.errornoted = True
                             m.clear_error()
                             # this tricks the mirror into thinking it has to wait `timeoutwaittime` from now
                             m.prevqtime = time.time() + self.timeoutwaittime - self.querywaittime
                         elif m.timeoutcount == self.timeoutlimit:
-                            print 'Timed out', self.timeoutlimit, 'times - DEACTIVATING mirror', m.readablename
+                            print 'Timed out', self.timeoutlimit, 'times - DEACTIVATING', m
                             m.errornoted = True
                             m.timeoutcount += 1  # silences future visits
                     elif not m.errornoted:
