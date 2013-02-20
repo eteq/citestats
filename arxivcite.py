@@ -422,8 +422,12 @@ class ADSMirror(object):
         otherwise
         """
         import socket
+        from urllib2 import URLError
 
-        return isinstance(self.error[1], socket.timeout)
+        issockto = isinstance(self.error[1], socket.timeout)
+        urlwithsockto = isinstance(self.error[1], URLError) and isinstance(self.error[1].args[0], socket.timeout)
+
+        return issockto or urlwithsockto
 
     def terminate_proc(self):
         if self.proc is not None:
