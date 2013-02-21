@@ -5,6 +5,7 @@ from __future__ import division
 """
 A module to query arxiv and match to ADS for citation statistics.
 """
+import Queue as queue
 
 from arxivoai2 import arxivoai2
 
@@ -14,12 +15,12 @@ mirrors = [
  ('University of Nottingham, United Kingdom', 'http://ukads.nottingham.ac.uk'),
  ('European Southern Observatory, Garching, Germany', 'http://esoads.eso.org'),
  ('Astronomisches Rechen-Institut, Heidelberg, Germany', 'http://ads.ari.uni-heidelberg.de'),
- ('Institute of Astronomy of the Russian Academy of Sciences, Moscow, Russia', 'http://ads.inasan.ru'),
+ #('Institute of Astronomy of the Russian Academy of Sciences, Moscow, Russia', 'http://ads.inasan.ru'), #worked initially, but now seemes to be always down
  ('Main Astronomical Observatory, Kiev, Ukraine', 'http://ads.mao.kiev.ua'),
  ('Pontificia Universidad Catolica, Santiago, Chile', 'http://ads.astro.puc.cl'),
  ('National Astronomical Observatory, Tokyo, Japan', 'http://ads.nao.ac.jp'),
- ('National Astronomical Observatory, Chinese Academy of Science, Beijing, China', 'http://ads.bao.ac.cn'),
- #('Inter-University Centre for Astronomy and Astrophysics, Pune, India', 'http://ads.iucaa.ernet.in'),
+ #('National Astronomical Observatory, Chinese Academy of Science, Beijing, China', 'http://ads.bao.ac.cn'), #not up-to-date
+ #('Inter-University Centre for Astronomy and Astrophysics, Pune, India', 'http://ads.iucaa.ernet.in'), #last time around this seemed to be always down
  ('Indonesian Institute of Sciences, Jakarta, Indonesia', ' http://ads.arsip.lipi.go.id'),
  ('South African Astronomical Observatory', 'http://saaoads.chpc.ac.za'),
  ('Observatorio Nacional, Rio de Janeiro, Brazil', 'http://ads.on.br')
@@ -245,14 +246,20 @@ def populate_mongodb_from_arxiv_reclists(reclistfns, dbname='citestats',
         conn.close()
 
 
-def get_cite_count_data_from_ads(arxivid, adsurl, urltimeout=5):
+def get_cite_count_data_from_ads(arxivid, adsurl, urltimeout=5, urllst=None):
     """
     This gets run from process_data_from_ads
+    `urllst` is a list that will be appended with the url if it is not None
     """
     from urllib2 import urlopen
     from xml.etree import cElementTree
 
-    url = '{adsurl}/cgi-bin/bib_query?{id}&data_type=SHORT_XML'.format(adsurl=adsurl, id=arxivid)
+    #arXiv IDs are either 'astro-ph/#####' or just '####.####' - in the latter case the bibcode has a 'arXiv:' in fron
+    url = '{adsurl}/cgi-bin/bib_query?{idbibcode}&data_type=SHORT_XML'
+    url = url.format(adsurl=adsurl, idbibcode=('arXiv:' + arxivid) if arxivid[:4].isdecimal() else arxivid)
+
+    if urllst is not None:
+        urllst.append(url)
     urlobj = None
 
     try:
@@ -291,62 +298,74 @@ def cite_count_proc(arxivid, adsurl, dbname, collname, waittime, laststarttime, 
     """
     This is run by ADSMirror as a subprocess
     """
-    from pymongo import MongoClient
-    import time
-    import traceback
-    from pickle import PicklingError
-    from cPickle import PicklingError as CPicklingError
-
     try:
-        dtime = time.time() - laststarttime
-        if dtime < waittime:
-            time.sleep(waittime - dtime)
-    except BaseException as e:
-        outqueue.put('error (while sleeping) before ' + arxivid)
-        outqueue.put(laststarttime)
+        from pymongo import MongoClient
+        import time
+        import traceback
+        import pickle
+        from pickle import PicklingError
+        from cPickle import PicklingError as CPicklingError
+
         try:
-            outqueue.put(e)
-        except (PicklingError, CPicklingError) as e2:
-            outqueue.put('Could not pickle error, string form:' + str(e))
-        outqueue.put(traceback.format_exc())
-        return
+            dtime = time.time() - laststarttime
+            if dtime < waittime:
+                time.sleep(waittime - dtime)
+        except BaseException as e:
+            outqueue.put('error (while sleeping) before ' + arxivid)
+            outqueue.put(laststarttime)
+            try:
+                pickle.dumps(e)
+                outqueue.put(e)
+            except (PicklingError, CPicklingError, TypeError) as e2:
+                outqueue.put('Could not pickle error, string form:' + str(e))
+            outqueue.put(traceback.format_exc())
+            return
 
-    qstarttime = time.time()
-    try:
-        data = get_cite_count_data_from_ads(arxivid, adsurl)
-    except BaseException as e:
-        outqueue.put('error (url) while getting ' + arxivid)
+        qstarttime = time.time()
+        urllst = []
+        try:
+            data = get_cite_count_data_from_ads(arxivid, adsurl, urllst=urllst)
+        except BaseException as e:
+            urlmsg = (' url:"' + urllst[0]) + '"' if len(urllst) > 0 else ''
+            outqueue.put('error (url) while getting ' + arxivid + urlmsg)
+            outqueue.put(qstarttime)
+            try:
+                pickle.dumps(e)
+                outqueue.put(e)
+            except (PicklingError, CPicklingError, TypeError) as e2:
+                outqueue.put('Could not pickle error, string form:' + str(e))
+            outqueue.put(traceback.format_exc())
+            return
+
+        conn = None
+        try:
+            conn = MongoClient()
+            coll = conn[dbname][collname]
+
+            coll.update({'arxiv_id': arxivid}, {'$set': data})
+        except Exception as e:
+            BaseException.put('error (mongo) while setting ' + arxivid)
+            outqueue.put(qstarttime)
+            try:
+                pickle.dumps(e)
+                outqueue.put(e)
+            except (PicklingError, CPicklingError, TypeError) as e2:
+                outqueue.put('Could not pickle error, string form:' + str(e))
+            outqueue.put(traceback.format_exc())
+            return
+        finally:
+            if conn is not None:
+                conn.close()
+        endtime = time.time()
+
+        outqueue.put('success at doing ' + arxivid)
         outqueue.put(qstarttime)
-        try:
-            outqueue.put(e)
-        except (PicklingError, CPicklingError) as e2:
-            outqueue.put('Could not pickle error, string form:' + str(e))
-        outqueue.put(traceback.format_exc())
-        return
-
-    conn = None
-    try:
-        conn = MongoClient()
-        coll = conn[dbname][collname]
-
-        coll.update({'arxiv_id': arxivid}, {'$set': data})
-    except Exception as e:
-        BaseException.put('error (mongo) while setting ' + arxivid)
-        outqueue.put(qstarttime)
-        try:
-            outqueue.put(e)
-        except (PicklingError, CPicklingError) as e2:
-            outqueue.put('Could not pickle error, string form:' + str(e))
-        outqueue.put(traceback.format_exc())
-        return
-    finally:
-        if conn is not None:
-            conn.close()
-    endtime = time.time()
-
-    outqueue.put('success at doing ' + arxivid)
-    outqueue.put(qstarttime)
-    outqueue.put(endtime - qstarttime)
+        outqueue.put(endtime - qstarttime)
+    except BaseException as e:
+        import traceback
+        print 'UNHANDLEDEX',e
+        traceback.print_exc()
+        raise
 
 
 class ADSMirror(object):
@@ -404,27 +423,31 @@ class ADSMirror(object):
         Also retrieves queue info and joins
         """
         import datetime
+        import traceback
 
         if self.proc is not None:
             if self.proc.is_alive():
                 return False
             else:
-                self.proc.join()
-                msg = self.queue.get_nowait()
-                self.prevqtime = self.queue.get_nowait()
-                if msg.startswith('success'):
-                    self.currarxivid = None
-                    self.qtimestamp.append(datetime.datetime.now())
-                    self.qprocessingtime.append(self.queue.get_nowait())
-                    self.timeoutcount = 0
-                if msg.startswith('error'):
-                    error = self.queue.get_nowait()
-                    tb = self.queue.get_nowait()
-                    self.error = (msg, error, tb)
-                    # if a timeout error, increment the count
-                    if self.timed_out():
-                        self.timeoutcount += 1
-                self.proc = None
+                try:
+                    self.proc.join()
+                    msg = self.queue.get_nowait()
+                    self.prevqtime = self.queue.get_nowait()
+                    if msg.startswith('success'):
+                        self.currarxivid = None
+                        self.qtimestamp.append(datetime.datetime.now())
+                        self.qprocessingtime.append(self.queue.get_nowait())
+                        self.timeoutcount = 0
+                    if msg.startswith('error'):
+                        error = self.queue.get_nowait()
+                        tb = self.queue.get_nowait()
+                        self.error = (msg, error, tb)
+                        # if a timeout error, increment the count
+                        if self.timed_out():
+                            self.timeoutcount += 1
+                    self.proc = None
+                except Exception as e:
+                    self.error = ('Exception while checking results', e, traceback.format_exc())
         return self.error is None  # ready if proc is None and there is no error
 
     def timed_out(self):
@@ -521,7 +544,13 @@ class ADSQuerier(object):
                     allerrored = False
                 elif m.error is None:
                     allerrored = False
+                elif 'HTTP Error 404' in m.error[1] and m.currarxivid is not None:  # error is not None
+                    print 'Could not locate id', m.currarxivid, 'in', m, 'sending to end of queue'
+                    aidstoquery.insert(0, m.currarxivid)
+                    m.currarxivid = None
+                    m.clear_error()
                 else:  # error is not None
+
                     if m.currarxivid is not None:
                         aidstoquery.append(m.currarxivid)
                         m.currarxivid = None
