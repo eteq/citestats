@@ -294,6 +294,8 @@ def cite_count_proc(arxivid, adsurl, dbname, collname, waittime, laststarttime, 
     from pymongo import MongoClient
     import time
     import traceback
+    from pickle import PicklingError
+    from cPickle import PicklingError as CPicklingError
 
     try:
         dtime = time.time() - laststarttime
@@ -302,7 +304,10 @@ def cite_count_proc(arxivid, adsurl, dbname, collname, waittime, laststarttime, 
     except BaseException as e:
         outqueue.put('error (while sleeping) before ' + arxivid)
         outqueue.put(laststarttime)
-        outqueue.put(e)
+        try:
+            outqueue.put(e)
+        except (PicklingError, CPicklingError) as e2:
+            outqueue.put('Could not pickle error, string form:' + str(e))
         outqueue.put(traceback.format_exc())
         return
 
@@ -312,7 +317,10 @@ def cite_count_proc(arxivid, adsurl, dbname, collname, waittime, laststarttime, 
     except BaseException as e:
         outqueue.put('error (url) while getting ' + arxivid)
         outqueue.put(qstarttime)
-        outqueue.put(e)
+        try:
+            outqueue.put(e)
+        except (PicklingError, CPicklingError) as e2:
+            outqueue.put('Could not pickle error, string form:' + str(e))
         outqueue.put(traceback.format_exc())
         return
 
@@ -325,7 +333,10 @@ def cite_count_proc(arxivid, adsurl, dbname, collname, waittime, laststarttime, 
     except Exception as e:
         BaseException.put('error (mongo) while setting ' + arxivid)
         outqueue.put(qstarttime)
-        outqueue.put(e)
+        try:
+            outqueue.put(e)
+        except (PicklingError, CPicklingError) as e2:
+            outqueue.put('Could not pickle error, string form:' + str(e))
         outqueue.put(traceback.format_exc())
         return
     finally:
@@ -511,10 +522,10 @@ class ADSQuerier(object):
                 elif m.error is None:
                     allerrored = False
                 else:  # error is not None
-
                     if m.currarxivid is not None:
                         aidstoquery.append(m.currarxivid)
                         m.currarxivid = None
+
                     if m.timed_out():
                         if m.timeoutcount < self.timeoutlimit:
                             print 'Resetting timeout error on ' + str(m) + ', waiting', self.timeoutwaittime, 'sec. Will allow', self.timeoutlimit - m.timeoutcount, 'more timeouts.'
@@ -561,6 +572,7 @@ class ADSQuerier(object):
         for m in self.mirrors:
             m.check_ready()
             m.clear_error()
+            m.timeoutcount = 0
 
     def mirror_time_stats(self):
         d = {}
