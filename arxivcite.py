@@ -246,10 +246,11 @@ def populate_mongodb_from_arxiv_reclists(reclistfns, dbname='citestats',
         conn.close()
 
 
-def get_cite_count_data_from_ads(arxivid, adsurl, urltimeout=5, urllst=None):
+def get_cite_count_data_from_ads(arxivid, adsurl, urltimeout=5, urllst=None, etlst=None):
     """
     This gets run from process_data_from_ads
-    `urllst` is a list that will be appended with the url if it is not None
+    `urllst` is a list that will be appended with the url if it is not
+    None, same for etlst with the cElementTree.
     """
     from urllib2 import urlopen
     from xml.etree import cElementTree
@@ -265,6 +266,8 @@ def get_cite_count_data_from_ads(arxivid, adsurl, urltimeout=5, urllst=None):
     try:
         urlobj = urlopen(url, timeout=urltimeout)
         et = cElementTree.parse(urlobj)
+        if etlst is not None:
+            etlst.append(et)
     finally:
         if hasattr(urlobj, 'close'):
             urlobj.close()
@@ -279,9 +282,12 @@ def get_cite_count_data_from_ads(arxivid, adsurl, urltimeout=5, urllst=None):
     titleelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}title')
     if titleelem is not None:
         data['title'] = titleelem.itertext().next()
-    authorelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}author')
-    if authorelem is not None:
-        data['fauthor'] = authorelem.itertext().next()
+    fauthorelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}author')
+    if fauthorelem is not None:
+        data['fauthor'] = fauthorelem.itertext().next()
+    allauthorelems = et.findall('.//{http://ads.harvard.edu/schema/abs/1.1/references}author')
+    if allauthorelems:
+        data['allauthors'] = [e.itertext().next() for e in allauthorelems]
     pubdateelem = et.find('.//{http://ads.harvard.edu/schema/abs/1.1/references}pubdate')
     if pubdateelem is not None:
         data['pubdate'] = pubdateelem.itertext().next()
