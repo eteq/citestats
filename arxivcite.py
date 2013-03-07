@@ -538,13 +538,14 @@ class ADSQuerier(object):
         laststatustime = -float('inf')
         sttime = time.time()
         launched = False
-        while len(aidstoquery) > 0 or any([m.currarxivid is not None for m in self.mirrors]):
+        while len(aidstoquery) > 0 and any([m.currarxivid is not None for m in self.mirrors]):
             #check if each mirror is available, try to give a job, if not check for errors
             allerrored = True
             for m in self.mirrors:
                 if m.check_ready():
                     if not launched:
                         time.sleep(launchspread)
+
                     aid = aidstoquery.pop()
                     m.spawn_arxiv_proc(aid, self.dbname, self.collname, self.querywaittime)
                     allerrored = False
