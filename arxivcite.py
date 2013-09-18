@@ -7,6 +7,7 @@ A module to query arxiv and match to ADS for citation statistics.
 """
 import Queue as queue
 
+import numpy as np
 from arxivoai2 import arxivoai2
 
 mirrors = [
@@ -121,7 +122,7 @@ def get_arxiv_ids(recprefix='arXiv_oai/reclist', sessionnum=''):
 
 
 def do_arxiv_session(incremental=False):
-    harvkwargs = dict(incremental=False, basewritename='arXiv_oai/reclist',
+    harvkwargs = dict(incremental=incremental, basewritename='arXiv_oai/reclist',
         startdate=None, format='arXivRaw', recordset='physics:astro-ph',
         baseurl='http://export.arxiv.org/oai2', recnumpadding=4)
 
@@ -617,11 +618,70 @@ class ADSQuerier(object):
         return d
 
 
+# Analysis stuff
+#----------------
+
+def get_citecount_arrays(dbname='citestats', collname='astroph'):
+    """
+    Gets arrays for the interesting elements.  Returns a dictionary with
+    * 'ids': arxiv ID
+    * 'ncites': number of citations
+    * 'subdate': a date object for the day the article was *submitted* - if you submit a moment *after* 4:00pm, it is this day (EST)
+    * 'subwd': the weekday number for 'subdate' - 0 is monday, 6 is Sunday
+    * 'postwd': the weekday number for the day the article appears on astro-ph (0 monday, 4 friday)
+    * 'subyr': the year cooresponding to 'subdate'
+
+    """
+    import datetime
+    import pytz
+    from pymongo import MongoClient
+
+    conn = MongoClient()
+    try:
+        coll = conn[dbname][collname]
+
+        cur = coll.find({'ncites':{'$exists' : True}})
+        print 'Found', cur.count(), 'w/cites out of a total of', coll.find().count()
+
+        #populate arrays using lists
+        ids = []
+        ncites = []
+        subdates = []
+        subwds = []
+        postwd = []
+        subyrs = []
+
+        ddt = datetime.timedelta(hours=16)
+        est = pytz.timezone('US/Eastern')
+
+        for d in cur:
+            ncites.append(d['ncites'])
+            ids.append(d['arxiv_id'])
+
+            date = (pytz.utc.localize(d['arxiv_date']) - ddt).astimezone(est).date()
+
+            subdates.append(date)
+            subwds.append(date.weekday())
+            postwd.append(date.weekday())
+            subyrs.append(date.year)
+
+    finally:
+        conn.close()
+
+    ids = np.array(ids)
+    ncite = np.array(ncites)
+    subdate = np.array(subdates)
+    subwd = np.array(subwds)
+    subyr = np.array(subyrs)
 
 
+    postwd = subwd.copy()
+    #Sat and Sun -> appear like things posted friday
+    postwd[postwd > 4] = 4
+    postwd += 2
+    postwd = postwd % 5
 
-
-
+    return dict([(nm, locals()[nm]) for nm in 'ids,ncite,subdate,subwd,postwd,subyr'.split(',')])
 
 
 
