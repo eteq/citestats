@@ -8,7 +8,7 @@ A module to query arxiv and match to ADS for citation statistics.
 import Queue as queue
 
 import numpy as np
-from arxivoai2 import arxivoai2
+from pyoai2 import pyoai2
 
 mirrors = [
  ('Harvard-Smithsonian Center for Astrophysics, Cambridge, USA', 'http://adsabs.harvard.edu'),
@@ -128,7 +128,7 @@ def do_arxiv_session(incremental=False):
 
     print 'Running OAI2Harvester with', harvkwargs
 
-    return arxivoai2.run_session(**harvkwargs)
+    return pyoai2.run_session(**harvkwargs)
 
 
 def start_mongodb(dbdir='db', port=None, waitforstartsecs=1, multimongo=False):
