@@ -12,42 +12,42 @@ from xml import sax
 class AdsFromArxiv(sax.handler.ContentHandler):
     def __init__(self,adsurl='http://adsabs.harvard.edu'):
         self.inarxivcode = ''
-        self.outarxivcode = '' 
+        self.outarxivcode = ''
         self.citations = 0
-        
+
         self.curr = None
         self.currname = ''
-        
+
         if adsurl.startswith('http://'):
             self.adsurl = adsurl
         else:
             self.adsurl = 'http://' + adsurl
-    
+
     def reset(self):
         self.__init__()
-    
+
     def startElement(self, name, attrs):
         if name=='eprintid' or name=='citations':
             self.currname = name
             self.curr = []
-    
+
     def endElement(self, name):
         if self.curr is not None:
             s = ''.join(self.curr)
-            
+
             if self.currname == 'eprintid':
                 if s.startswith('arXiv:'):
                     self.outarxivcode = s[6:]
             elif self.currname == 'citations':
                 self.citations = int(s)
-            
+
             self.curr = None
             self.currname = ''
-            
-    def characters(self, chrs):  
+
+    def characters(self, chrs):
         if self.curr is not None:
             self.curr.append(chrs)
-    
+
     _ads_query = '%s/cgi-bin/bib_query?arXiv:%s&data_type=SHORT_XML'
     def query_ads(self,arxivcode):
         if '.' not in arxivcode:
@@ -55,37 +55,37 @@ class AdsFromArxiv(sax.handler.ContentHandler):
         url = AdsFromArxiv._ads_query%(self.adsurl,arxivcode)
         with closing(urlopen(url)) as w:
             s = w.read()
-        
+
         sax.parseString(s,self)
         self.inarxivcode = arxivcode
         return url
-    
-    
+
+
 
 class ArxivSearcher(sax.handler.ContentHandler):
     def __init__(self):
         self.arxivids = []
         self.pubdates = []
         self.totabs = -1
-        
+
         self.curr = None
         self.currid = None
         self.currpub = None
         self.currname = ''
         self.inentry = False
-        
-        
-        
+
+
+
     def reset(self):
         self.__init__()
-    
+
     def startElement(self, name, attrs):
         if name=='opensearch:totalResults' or name=='published' or name=='id':
             self.currname = name
             self.curr = []
         elif name == 'entry':
             self.inentry = True
-    
+
     def endElement(self, name):
         if name == 'entry':
             self.inentry = False
@@ -93,34 +93,34 @@ class ArxivSearcher(sax.handler.ContentHandler):
             self.pubdates.append(self.currpub)
             self.currid = None
             self.currpub = None
-            
+
         elif self.curr is not None:
             s = ''.join(self.curr)
-            
+
             if self.currname == 'opensearch:totalResults':
                 self.totabs = int(s)
             elif self.currname == 'id' and self.currid is None:
                 self.currid = s.split('/')[-1][:-2]
             elif self.currname == 'published' and self.currpub is None:
                 self.currpub = s
-                
+
             self.curr = None
             self.currname = ''
-            
-    def characters(self, chrs):  
+
+    def characters(self, chrs):
         if self.curr is not None:
             self.curr.append(chrs)
     _arxivquery='http://export.arxiv.org/api/query?search_query=submittedDate:[{syr}+TO+{eyr}]+AND+cat:astro-ph*&sortBy=submittedDate&sortO%20rder=ascending&start={st}&max_results={mx}'
-    def query_arxiv(self,start=0,mx=10,syr=1992,eyr=2012):        
+    def query_arxiv(self,start=0,mx=10,syr=1992,eyr=2012):
         url = ArxivSearcher._arxivquery.format(st=start,mx=mx,syr=syr,eyr=eyr)
         with closing(urlopen(url)) as w:
             s = w.read()
-        
+
         sax.parseString(s,self)
-        
-    
+
+
 class Searcher(object):
-    def __init__(self,pfn=None,nperarxiv=1000,pickleperads=50,startyr=1992):        
+    def __init__(self,pfn=None,nperarxiv=1000,pickleperads=50,startyr=1992):
         self.ids = []
         self.dates = []
         self.currids = []
@@ -135,42 +135,42 @@ class Searcher(object):
         self.pickleperads = pickleperads
         self.yearsdone = []
         self.startyr = startyr
-    
+
     def arxiv_search(self,waittime=3):
         import time,cPickle,datetime
-        
+
         nper = self.nperarxiv
-        
+
         #figure out the years to search - arxiv astro-ph starts in 1992
         yrs = [yr+self.startyr for yr in range(datetime.datetime.now().year+1-self.startyr)]
         print 'yrs',yrs
-        
+
         for yr in yrs:
             if yr in self.yearsdone:
                 continue
             print 'Starting search for year',yr
-                
+
             sr = ArxivSearcher()
             sr.query_arxiv(len(self.currids)+self.startarxivtotal,nper,syr=yr,eyr=yr+1)
             if self.startedyr is None:
                 self.startedyr = datetime.datetime.now()
-                self.startarxivtotal = sr.totabs 
+                self.startarxivtotal = sr.totabs
             target = self.startarxivtotal
             print 'Year',yr,'Has',target,'in total'
-            
+
             while len(self.currids)<target:
                 t0 = time.time()
                 self.currids.extend(sr.arxivids)
                 self.currdates.extend(sr.pubdates)
                 startoffset = sr.totabs - self.startarxivtotal
-                
+
                 nleft = target - len(self.currids)
                 print 'Have',len(self.currids),'Abstracts',nleft,'Remaining in year',yr,'(Skipped %i)'%startoffset
                 if self.picklefn is not None:
                     print 'Pickling to',self.picklefn
                     with open(self.picklefn,'w') as f:
                         cPickle.dump(self,f,-1)
-                
+
                 t1 = time.time()
                 stime = waittime - (t1 - t0)
                 if stime > 0:
@@ -178,7 +178,7 @@ class Searcher(object):
                     time.sleep(stime)
                 sr.reset()
                 sr.query_arxiv(len(self.currids)+startoffset,nper,syr=yr,eyr=yr+1)
-            
+
             print 'Search of year',yr,'Complete','(Got %i,Skipped %i)'%(len(self.currids),sr.totabs-self.startarxivtotal)
             self.resetyr(yr)
         if self.picklefn is not None:
@@ -186,8 +186,8 @@ class Searcher(object):
             with open(self.picklefn,'w') as f:
                 cPickle.dump(self,f,-1)
         print 'Completed Search, found',len(self.ids),'Abstracts'
-     
-        
+
+
     def resetyr(self,yr):
         if yr is not None:
             self.yearsdone.append(yr)
@@ -197,14 +197,14 @@ class Searcher(object):
         self.currdates = []
         self.startedyr = None
         self.startarxivtotal = 0
-        
+
     def get_cite_count(self,waittime=.5,adsurl='http://adsabs.harvard.edu'):
         import time,cPickle,urllib2
-        
+
         pickleper = self.pickleperads
         aa = AdsFromArxiv(adsurl=adsurl)
         timeouts = 0
-        
+
         while len(self.citations)<len(self.ids):
             t0 = time.time()
             try:
@@ -218,7 +218,7 @@ class Searcher(object):
                         incode = incode[:-1]
                     elif incode[-2] == 'v':
                         incode = incode[:-2]
-                        
+
                     if incode == aa.outarxivcode:
                         self.citations.append(aa.citations)
                         self.peerrev.append(True)
@@ -246,45 +246,45 @@ class Searcher(object):
                 else:
                     print 'HTTP Error at URL',e1.geturl()
                     raise
-                    
-            timeouts = 0    
+
+            timeouts = 0
             print 'Got Citations for #',len(self.citations),',',len(self.ids)-len(self.citations),'Remaining'
-                
+
             if self.picklefn is not None and len(self.citations)%pickleper==0:
                 print 'Pickling to',self.picklefn
                 with open(self.picklefn,'w') as f:
                     cPickle.dump(self,f,-1)
-                    
-                
+
+
             aa.reset()
-                
+
             t1 = time.time()
             stime = waittime - (t1 - t0)
             if stime > 0:
                 print 'Sleeping',stime,'s'
                 time.sleep(stime)
-                
+
         if self.picklefn is not None:
             print 'Final Pickling to',self.picklefn
             with open(self.picklefn,'w') as f:
                 cPickle.dump(self,f,-1)
-                
-                
+
+
     def cite_array(self):
         from numpy import array
-        
+
         return array(self.citations)
-        
+
     def wd_array(self,skipweekends=True):
         """
         wd at which the paper appears on the listing.
-        Monday is 0 and Sunday is 6 
+        Monday is 0 and Sunday is 6
         If `skipweekends` is true, Sat/Sun are pushed to Mon
         """
         from numpy import array
         import datetime
         from pytz import timezone,UTC
-        
+
         wd = []
         for d in self.dates:
             if d is None:
@@ -304,11 +304,11 @@ class Searcher(object):
         if skipweekends:
             res[res>4]=0
         return res
-    
+
     def rank_in_day_array(self,reversedrank=False):
         """
         `reversedrank` means -1 for last, -2 for second-to-last, etc.
-        
+
         returns rank,mask,
         """
         from pytz import timezone,UTC
@@ -316,11 +316,11 @@ class Searcher(object):
         from numpy import array,zeros,argsort
         from collections import defaultdict
         from time import strptime
-        
+
         ranks = zeros(len(self.ids))
         ords = []
         msk = []
-        
+
         fmt = '%Y-%m-%dT%H:%M:%SZ'
         tzeastern = timezone('US/Eastern')
         dt1 = timedelta(1)
@@ -343,7 +343,7 @@ class Searcher(object):
                 msk.append(False)
         ords = array(ords)
         msk = array(msk)
-        
+
         dis = defaultdict(list)
         dids = defaultdict(list)
         for i,(o,id) in enumerate(zip(ords,self.ids)):
@@ -353,7 +353,7 @@ class Searcher(object):
             except ValueError:
                 pass
                 #print 'Nday failed for',i,o,'Due to id of',id
-        
+
         for o in dis.keys():
             sorti = argsort(dids[o])
             for i,rank in zip(dis[o],sorti):
@@ -361,21 +361,21 @@ class Searcher(object):
                     ranks[i] = rank - len(sorti)
                 else:
                     ranks[i] = rank+1
-        
+
         msk[ranks==0] = False
         return ranks,msk
-    
+
     def papers_over_time(self):
         from pytz import timezone,UTC
         from datetime import datetime,timedelta
         from numpy import array,zeros,argsort
         from collections import defaultdict
         from time import strptime
-        
+
         ranks = zeros(len(self.ids))
         ords = []
         msk = []
-        
+
         fmt = '%Y-%m-%dT%H:%M:%SZ'
         tzeastern = timezone('US/Eastern')
         dt1 = timedelta(1)
@@ -398,7 +398,7 @@ class Searcher(object):
                 msk.append(False)
         ords = array(ords)
         msk = array(msk)
-        
+
         dis = defaultdict(list)
         dids = defaultdict(list)
         for i,(o,id) in enumerate(zip(ords,self.ids)):
@@ -408,104 +408,104 @@ class Searcher(object):
             except ValueError:
                 print 'Nday failed for',i,o,'Due to id of',id
                 dis[o]
-        
+
         os = []
         ns = []
         for o in dis.keys():
             os.append(o)
             ns.append(len(dids[o]))
         os,ns = arrary(os),array(ns)
-        
+
         return os[os>0],ns[os>0]
-        
+
     def cite_by_wd(self,filter0=True,skipweekends=True):
         wd = self.wd_array(skipweekends)
         ndays = 5 if skipweekends else 7
         cs = self.cite_array()
         if wd.size!=cs.size:
             wd = wd[:cs.size]
-        
+
         if filter0:
             cspd = [cs[(i==wd)&(0!=cs)] for i in range(ndays)]
         else:
             cspd = [cs[i==wd] for i in range(ndays)]
-            
+
         return cspd
-      
+
     def zipf_day_plots(self,filter0=True,skipweekends=True):
         import numpy as np
         from matplotlib import pyplot as plt
-        
+
         cbw = self.cite_by_wd(filter0,skipweekends)
-        
+
         if skipweekends:
             days = ['Sa/Su/M','Tu','W','Th','F']
         else:
             days = ['M','Tu','W','Th','F','Sa','Su']
-         
+
         for c,d in zip(cbw,days):
             x = (np.arange(c.size)+1)/c.size
             y = c[np.argsort(c)][::-1]
-            
+
             plt.loglog(x,y,label=d)
         plt.legend(loc=0)
         plt.xlabel('$r/N$')
         plt.ylabel('Citations')
-            
+
     def zipf_rank_plots(self,filter0=True):
         import numpy as np
         from matplotlib import pyplot as plt
-        
+
         r,mr = self.rank_in_day_array()
         print 'Between ranks'
         rr,mr = self.rank_in_day_array(True)
         cs = self.cite_array()
-        
+
         if r.size!=cs.size:
             r = r[:cs.size]
         if rr.size!=cs.size:
             rr = rr[:cs.size]
-            
+
         labels = ['1','2','3','4','5','>5','last']
         msks = [r==1,r==2,r==3,r==4,r==5,r>5,rr==-1]
-         
+
         for msk,l in zip(msks,labels):
             c = cs[msk]
             x = (np.arange(c.size)+1)/c.size
             y = c[np.argsort(c)][::-1]
-            
+
             plt.loglog(x,y,label=l)
         plt.legend(loc=0)
         plt.xlabel('$r/N$')
         plt.ylabel('Citations')
-            
+
     def compare_zipf_rand(self,filter0=True,skipweekends=True):
         import numpy as np
         from numpy import random
         from matplotlib import pyplot as plt
-        
+
         #real data
         cbw = self.cite_by_wd(filter0,skipweekends)
         if skipweekends:
             days = ['Sa/Su/M','Tu','W','Th','F']
         else:
             days = ['M','Tu','W','Th','F','Sa','Su']
-         
+
         realys = [np.sort(c)[::-1] for c in cbw]
         realsz = np.min([r.size for r in realys])
         realxs = np.array([(np.arange(c.size)+1)[-realsz:]/c.size for c in cbw])
         realys = np.array([r[-realsz:] for r in realys])
-        
+
         #sim data
         all = np.concatenate(self.cite_by_wd())
         ps = random.permutation(all.size)
-        
+
         #equal size slices
         pse = [np.sort(all[ps[int(i*all.size/5):int((i+1)*all.size/5)]])[::-1] for i in range(5)]
         psesz = np.min([p.size for p in pse])
         psex = np.array([(np.arange(p.size)+1)[-psesz:]/p.size for p in pse])
         psey = np.array([p[-psesz:] for p in pse])
-        
+
         #slices matching real
         psm = []
         i = 0
@@ -515,7 +515,7 @@ class Searcher(object):
         psmsz = np.min([p.size for p in psm])
         psmx = np.array([(np.arange(p.size)+1)[-psmsz:]/p.size for p in psm])
         psmy = np.array([p[-psmsz:] for p in psm])
-        
+
         minx = np.min((np.min(psmx),np.min(psex),np.min(realxs)))
         x = np.logspace(-4,0,5000)
         nms = ['Equal-Space','Matched','Real']
@@ -527,30 +527,30 @@ class Searcher(object):
         plt.legend(loc=0)
         plt.xlabel('$r/N$')
         plt.ylabel(r'$\sigma_{\rm cite}/\mu_{\rm cite}$')
-        
+
     def ks_array(self):
         from numpy import empty
         from scipy.stats import ks_2samp
-    
+
         cites = self.cite_by_wd()
         ksD = empty((7,7))
         ksp = empty((7,7))
-        
+
         for i,ai in enumerate(cites):
             for j,aj in enumerate(cites):
                 Dij,pij = ks_2samp(ai,aj)
                 ksD[i,j] = Dij
                 ksp[i,j] = pij
-        
+
         return ksD,ksp
-        
+
     def ks_plot(self,clf=True,stat='p',cut=None):
         import numpy as np
         from matplotlib import pyplot as plt
         from matplotlib import rcParams,cm
-    
+
         ksD,ksp = self.ks_array()
-        
+
         if clf:
             plt.clf()
         if stat=='p':
@@ -559,10 +559,10 @@ class Searcher(object):
             kss = ksD
         else:
             raise ValueError('invalid stat '+str(stat))
-        
+
         if clf:
             plt.clf()
-        
+
         cmap = getattr(cm,rcParams['image.cmap'])
         if cut:
             newsdata = dict(cmap._segmentdata)
@@ -574,43 +574,43 @@ class Searcher(object):
                 cl.insert(0,(cut,0,0))
                 cl.insert(0,(0,0,0))
                 newsdata[cn] = tuple(cl)
-            
+
             cmap = cmap.__class__(name=cmap.name+'-cut',segmentdata=newsdata)
-        
+
         plt.imshow(kss,interpolation='nearest',origin='lower',cmap=cmap)
         plt.xticks(np.arange(7),['M','Tu','W','Th','F','Sa','Su'])
         plt.yticks(np.arange(7),['M','Tu','W','Th','F','Sa','Su'])
         plt.colorbar()
-        
+
 def funpickle(fileorname,number=0,usecPickle=True):
     """
     Unpickle a pickled object from a specified file and return the contents.
-    
+
     :param fileorname: The file from which to unpickle objects
     :type fileorname: a file name string or a :class:`file` object
-    :param number: 
+    :param number:
         The number of objects to unpickle - if <1, returns a single object.
     :type number: int
-    :param usecPickle: 
+    :param usecPickle:
         If True, the :mod:`cPickle` module is to be used in place of
         :mod:`pickle` (cPickle is faster).
-    :type usecPickle: bool 
-    
+    :type usecPickle: bool
+
     :returns: A list of length given by `number` or a single object if number<1
-    
+
     """
     if usecPickle:
         import cPickle as pickle
     else:
         import pickle
-        
+
     if isinstance(fileorname,basestring):
         f = open(fileorname,'r')
         close = True
     else:
         f = fileorname
         close = False
-        
+
     try:
         if number > 0:
             res = []
@@ -629,12 +629,12 @@ def funpickle(fileorname,number=0,usecPickle=True):
     finally:
         if close:
             f.close()
-            
+
     return res
 
 if __name__=='__main__':
     import os,cPickle,sys
-    
+
     if os.path.exists('arxivads.pickle'):
         with open('arxivads.pickle') as f:
             sr = cPickle.load(f)
@@ -644,11 +644,11 @@ if __name__=='__main__':
     if len(sys.argv)<2:
         sys.argv.append('-s')
         sys.argv.append('-m')
-        
-    if '-s' in sys.argv:    
+
+    if '-s' in sys.argv:
         print 'Starting Search'
         sr.arxiv_search()
-    if '-m' in sys.argv:    
+    if '-m' in sys.argv:
         i = sys.argv.index('-m')
         print 'Starting Match'
         if len(sys.argv)>(i+1):
@@ -656,7 +656,7 @@ if __name__=='__main__':
             sr.get_cite_count(adsurl=adsurl)
         else:
             sr.get_cite_count()
-            
+
     if '-d' in sys.argv:
         from matplotlib import pyplot as plt
         plt.figure(1)
